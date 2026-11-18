@@ -1,0 +1,208 @@
+"""build_site: structure, policy rules (banned words, emoji, no price / ratings), SEO output, content swap-in from iltonggi."""
+import datetime as dt
+import re
+import shutil
+import unittest
+from pathlib import Path
+
+from helpers import NOW, REPO, bs, build, jsonld, make_site, post_text
+
+PAGES = ["", "about/", "privacy/", "support/", "terms/", "journal/"]
+
+
+class Built(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.root = make_site()
+        cls.ctx = build(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, True)
+
+    def read(self, rel):
+        return (self.root / rel).read_text(encoding="utf-8")
+
+    def test_every_required_page_exists_in_both_languages(self):
+        for lang_dir in ("", "ko/"):
+            for p in PAGES:
+                self.assertTrue((self.root / (lang_dir + p) / "index.html").is_file(), lang_dir + p)
+        self.assertTrue((self.root / "404.html").is_file())
+
+    def test_phase_one_languages_only(self):
+        self.assertEqual(self.ctx.langs, ["en", "ko"])
+
+    def test_last_updated_on_every_page(self):
+        for lang_dir in ("", "ko/"):
+            for p in PAGES:
+                h = self.read(lang_dir + p + "index.html")
+                self.assertRegex(h, r'<p class="updated">[^<]+: <time datetime="\d{4}-\d{2}-\d{2}">\d{4}-\d{2}-\d{2}</time></p>', lang_dir + p)
+        self.assertIn('class="updated"', self.read("404.html"))
+
+    def test_hreflang_and_canonical(self):
+        h = self.read("index.html")
+        self.assertIn('<link rel="canonical" href="https://blushlab.ipe.rest/">', h)
+        for l, pth in (("en", "/"), ("ko", "/ko/"), ("x-default", "/")):
+            self.assertIn('hreflang="%s" href="https://blushlab.ipe.rest%s"' % (l, pth), h)
+        self.assertIn('<html lang="ko"', self.read("ko/index.html"))
+
+    def test_404_is_noindex_without_canonical(self):
+        h = self.read("404.html")
+        self.assertIn("noindex", h)
+        self.assertNotIn('rel="canonical"', h)
+
+    def test_cache_busting_and_design_tokens(self):
+        h = self.read("index.html")
+        self.assertIn("/assets/blushlab.css?v=%s" % bs.ASSET_V, h)
+        css = (REPO / "assets" / "blushlab.css").read_text(encoding="utf-8")
+        for token in ("--bg:#FFF8FA", "--accent:#A8325A", ":root:not([data-theme=\"dark\"])", "--bg:#1A1017", "--font-head", "--font-body"):
+            self.assertIn(token, css)
+        self.assertIn("Unbounded", h)
+        self.assertIn("Manrope", h)
+
+    def test_root_loads_kit_language_detection_only_on_home(self):
+        self.assertRegex(self.read("index.html"), r'<script src="/assets/ipe-lang\.js\?v=[^"]+" data-redirect defer></script>')
+        self.assertNotIn("ipe-lang.js", self.read("about/index.html"))
+        self.assertNotIn("ipe-lang.js", self.read("ko/index.html"))
+
+    def test_store_badges_are_not_links(self):
+        for lang_dir in ("", "ko/"):
+            h = self.read(lang_dir + "index.html")
+            badges = re.findall(r'<span class="store">.*?</b></span>', h, re.S)
+            self.assertEqual(len(badges), 4, lang_dir)  # hero + cta, two stores each
+            for b in badges:
+                self.assertNotIn("<a ", b)
+        self.assertNotIn("apps.apple.com", self.read("index.html"))
+        self.assertNotIn("play.google.com", self.read("index.html"))
+
+    def test_json_ld_game_has_no_offers_or_ratings(self):
+        for graph in jsonld(self.read("index.html")):
+            for node in graph["@graph"]:
+                if node.get("@type") == "VideoGame":
+                    for bad in ("offers", "aggregateRating", "review", "datePublished"):
+                        self.assertNotIn(bad, node)
+        self.assertNotIn("aggregateRating", "".join(str(jsonld(self.read(p + "index.html"))) for p in PAGES))
+
+    def test_post_page(self):
+        h = self.read("journal/alpha-post/index.html")
+        self.assertIn("BlogPosting", h)
+        self.assertIn('hreflang="ko" href="https://blushlab.ipe.rest/ko/journal/alpha-post/"', h)
+
+    def test_sitemap_robots_llms_feed(self):
+        sm = self.read("sitemap.xml")
+        for pth in ("/", "/ko/", "/about/", "/ko/terms/", "/support/", "/journal/", "/journal/beta-post/"):
+            self.assertIn("<loc>https://blushlab.ipe.rest%s</loc>" % pth, sm)
+        self.assertNotIn("/404", sm)
+        self.assertIn("Sitemap: https://blushlab.ipe.rest/sitemap.xml", self.read("robots.txt"))
+        for bot in ("GPTBot", "ClaudeBot", "PerplexityBot"):
+            self.assertIn("User-agent: %s" % bot, self.read("robots.txt"))
+        llms = self.read("llms.txt")
+        self.assertIn("NOT been released", llms)
+        self.assertIn("https://blushlab.ipe.rest/journal/beta-post/", llms)
+        self.assertIn("<rss", self.read("journal/feed.xml"))
+        self.assertIn("<rss", self.read("ko/journal/feed.xml"))
+
+    def test_policy_pages_have_no_leftover_names(self):
+        for lang_dir in ("", "ko/"):
+            for slug in ("privacy", "terms", "support"):
+                h = self.read("%s%s/index.html" % (lang_dir, slug))
+                self.assertNotRegex(h.lower(), r"iltonggi|일통기|inkisle|weather|날씨")
+                self.assertIn("ipe.haven@gmail.com", h)
+        self.assertIn("Davy Kim (ipe Studio)", self.read("privacy/index.html"))
+        self.assertIn("Blushlab", self.read("terms/index.html"))
+
+    def test_no_price_rating_or_banned_words_anywhere(self):
+        for f in self.root.rglob("*.html"):
+            if "assets" in f.parts:
+                continue
+            h = f.read_text(encoding="utf-8")
+            text = re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S)
+            self.assertIsNone(bs.BANNED_WORDS.search(text), f)
+            self.assertIsNone(bs.EMOJI.search(text), f)
+            self.assertNotRegex(text, r"[$€₩]\s?\d|\d\s?(?:USD|KRW|원)\b", str(f))
+            self.assertNotRegex(text.lower(), r"\d+\+? (?:downloads|reviews|ratings)|(?:다운로드|리뷰|평점)\s?\d", str(f))
+
+    def test_rival_names_are_not_on_the_site(self):
+        # tentative names must never leak: the i18n/page sources only say "8 AI rivals, 3 leagues"
+        for f in (REPO / "content").rglob("*"):
+            if f.is_file() and f.suffix in (".json", ".md"):
+                self.assertNotRegex(f.read_text(encoding="utf-8").lower(), r"league names|rival names", str(f))
+
+    def test_home_has_tub_illustration_and_status(self):
+        h = self.read("index.html")
+        self.assertIn('<svg class="tub"', h)
+        self.assertIn("In development", h)
+
+    def test_no_horizontal_layout_hazards_in_markup(self):
+        for f in self.root.rglob("*.html"):
+            if "assets" in f.parts:
+                continue
+            self.assertRegex(f.read_text(encoding="utf-8"), r'<meta name="viewport" content="width=device-width, ?initial-scale=1">')
+
+
+class Rules(unittest.TestCase):
+    def setUp(self):
+        self.root = make_site()
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def errs(self, now=NOW):
+        return bs.make_ctx(self.root, now)[1]
+
+    def test_clean_site_has_no_errors(self):
+        self.assertEqual(self.errs(), [])
+
+    def test_banned_word_rejected(self):
+        for word in ("Suika", "수박게임", "Watermelon game"):
+            f = self.root / "content" / "pages" / "en" / "about.md"
+            f.write_text(f.read_text(encoding="utf-8") + "\nLike %s.\n" % word, encoding="utf-8")
+            self.assertTrue(any("banned word" in e for e in self.errs()), word)
+            f.write_text(f.read_text(encoding="utf-8").replace("\nLike %s.\n" % word, ""), encoding="utf-8")
+        self.assertEqual(self.errs(), [])
+
+    def test_emoji_rejected(self):
+        f = self.root / "content" / "journal" / "alpha-post" / "en.md"
+        f.write_text(f.read_text(encoding="utf-8") + "\nHooray \U0001F389\n", encoding="utf-8")
+        self.assertTrue(any("emoji" in e for e in self.errs()))
+
+    def test_secret_or_local_path_rejected(self):
+        f = self.root / "content" / "pages" / "en" / "about.md"
+        f.write_text(f.read_text(encoding="utf-8") + "\n/Users/someone/x\n", encoding="utf-8")
+        self.assertTrue(any("forbidden text" in e for e in self.errs()))
+
+    def test_future_post_rejected(self):
+        self.assertTrue(any("future" in e for e in self.errs(dt.datetime(2026, 10, 1, tzinfo=bs.KST))))
+
+    def test_missing_page_or_key_rejected(self):
+        (self.root / "content" / "pages" / "ko" / "terms.md").unlink()
+        self.assertTrue(any("en and ko must both be complete" in e for e in self.errs()))
+
+    def test_queued_post_needs_faq(self):
+        self.assertEqual(self.errs(), [])
+        d = self.root / "content" / "queue" / "09-no-faq"
+        d.mkdir(parents=True)
+        (d / "en.md").write_text(post_text("no-faq", "en", "No FAQ"), encoding="utf-8")
+        self.assertTrue(any("queue/09-no-faq/en.md: FAQ section missing" in e for e in self.errs()))
+
+    def test_page_needs_updated_date(self):
+        f = self.root / "content" / "pages" / "en" / "privacy.md"
+        f.write_text(re.sub(r"updated:.*\n", "", f.read_text(encoding="utf-8")), encoding="utf-8")
+        self.assertTrue(any("missing updated" in e for e in self.errs()))
+
+
+class Repo(unittest.TestCase):
+    def test_cname_and_indexnow_key(self):
+        self.assertEqual((REPO / "CNAME").read_text().strip(), "blushlab.ipe.rest")
+        keys = [p for p in REPO.glob("*.txt") if re.fullmatch(r"[0-9a-f]{32}\.txt", p.name) and p.name not in ("llms.txt",)]
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys[0].read_text().strip(), keys[0].stem)
+        self.assertNotEqual(keys[0].stem, "0f3a1c5e7b9d2a4c6e8f0b1d3a5c7e9f")  # placeholder guard; must never be inkisle's key
+
+    def test_repo_has_no_planning_docs_or_inkisle_leftovers(self):
+        self.assertFalse((REPO / "docs").exists())
+        for p in (REPO / "scripts").glob("*"):
+            if p.is_file():
+                self.assertNotIn("inkisle", p.read_text(encoding="utf-8", errors="ignore").lower(), p.name)
+
+
+if __name__ == "__main__":
+    unittest.main()

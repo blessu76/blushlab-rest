@@ -1,0 +1,42 @@
+# Blushlab
+
+> Blushlab combines a makeup studio and a My Face mode in one game for iOS and Android, now in development. Try shadow, liner, lashes, blush, lip, brows and lenses on a face, or on your own photo.
+
+Blushlab is a casual makeup game by ipe() (https://ipe.rest/). It is in development for iOS and Android and has NOT been released: no store page or release date exists yet. This site is the game's home and its journal.
+
+## Key facts
+
+- Makeup Studio: try shadow, liner, lashes, blush, lip, brows and lenses on a character.
+- My Face: use the same tools on your own photo. Photos are processed only on your device and are not sent to a server.
+- Free to start; in-app purchases are available. No ads.
+
+## Privacy
+
+- The Blushlab app does not send photos to a server.
+- This website collects only basic visit statistics through Google Analytics and has no ads; see the privacy policy.
+
+## Pages
+
+- [Home](https://blushlab.ipe.rest/): Makeup Studio uses face-makeup tools. My Face uses your own photo, processed on your device. Free to start, no ads.
+- [About](https://blushlab.ipe.rest/about/): what Blushlab is and who makes it
+- [Support](https://blushlab.ipe.rest/support/): contact and questions
+- [Privacy Policy](https://blushlab.ipe.rest/privacy/)
+- [Terms of Use](https://blushlab.ipe.rest/terms/)
+- [Journal](https://blushlab.ipe.rest/journal/): notes from the making of the app
+- [RSS](https://blushlab.ipe.rest/journal/feed.xml)
+
+## Journal posts (English)
+
+
+## Journal posts (한국어)
+
+
+Every journal post ends with an FAQ section. Feeds: https://blushlab.ipe.rest/journal/feed.xml (English), https://blushlab.ipe.rest/ko/journal/feed.xml (한국어).
+
+## Languages
+
+The site is available in 12 languages: English, 한국어, 日本語, 繁體中文, Español, Português (Brasil), Français, Deutsch, Bahasa Indonesia, ไทย, Tiếng Việt, Türkçe. Each language lives under /<code>/ (English at the root).
+
+## Contact and operator
+
+Davy Kim (ipe Studio) — ipe.haven@gmail.com
