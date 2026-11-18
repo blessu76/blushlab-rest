@@ -846,14 +846,14 @@ def build_llms(ctx):
             "- [Privacy Policy](%s%s)" % (SITE, path_page("en", "privacy")),
             "- [Terms of Use](%s%s)" % (SITE, path_page("en", "terms")),
             "- [Journal](%s%s): notes from the making of the game" % (SITE, path_journal("en")),
-            "- [RSS](%s%s)" % (SITE, path_feed("en")), "", "## Journal posts (English)", ""]
-    for p in posts_in(ctx, "en"):
-        d = p["langs"]["en"]
-        rows.append("- [%s](%s) — %s — %s" % (d["title"], url(path_post("en", p["slug"])), fmt_date(p), d["description"]))
-    rows += ["", "## Journal posts (한국어)", ""]
-    for p in posts_in(ctx, "ko"):
-        d = p["langs"]["ko"]
-        rows.append("- [%s](%s) — %s — %s" % (d["title"], url(path_post("ko", p["slug"])), fmt_date(p), d["description"]))
+            "- [RSS](%s%s)" % (SITE, path_feed("en"))]
+    for lang, heading in (("en", "## Journal posts (English)"), ("ko", "## Journal posts (한국어)")):
+        if not posts_in(ctx, lang):  # 글이 없으면 빈 섹션 헤더를 내지 않는다
+            continue
+        rows += ["", heading, ""]
+        for p in posts_in(ctx, lang):
+            d = p["langs"][lang]
+            rows.append("- [%s](%s) — %s — %s" % (d["title"], url(path_post(lang, p["slug"])), fmt_date(p), d["description"]))
     rows += ["", "Every journal post ends with an FAQ section. Feeds: %s%s (English), %s%s (한국어)." % (SITE, path_feed("en"), SITE, path_feed("ko"))]
     rows += ["", "## Languages", "", "The site is available in %d languages: %s. Each language lives under /<code>/ (English at the root)." % (
         len(ctx.langs), ", ".join(LANGS[l][0] for l in ctx.langs)), "",

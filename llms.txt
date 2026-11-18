@@ -25,12 +25,6 @@ Blushlab is a casual makeup game by ipe() (https://ipe.rest/). It is in developm
 - [Journal](https://blushlab.ipe.rest/journal/): notes from the making of the game
 - [RSS](https://blushlab.ipe.rest/journal/feed.xml)
 
-## Journal posts (English)
-
-
-## Journal posts (한국어)
-
-
 Every journal post ends with an FAQ section. Feeds: https://blushlab.ipe.rest/journal/feed.xml (English), https://blushlab.ipe.rest/ko/journal/feed.xml (한국어).
 
 ## Languages

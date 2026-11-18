@@ -2,7 +2,7 @@
   "_note": "Blushlab privacy policy configuration for ipe_web_kit v0.4.2+. Service uses no comments feature — markdown pages are used instead.",
   "service": "Blushlab",
   "operator": "ipe()",
-  "contactEmail": "privacy@ipe.rest",
+  "contactEmail": "ipe.haven@gmail.com",
   "features": {"comments": false},
   "langs": ["en", "ko"],
   "retentionYears": 3,
