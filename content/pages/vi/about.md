@@ -4,7 +4,7 @@ description: Blushlab là một studio trang điểm và trò chơi dùng ảnh 
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab kết hợp studio trang điểm và chế độ Khuôn mặt của tôi trong một ứng dụng. Trò chơi do **ipe()** (ipe Studio) thực hiện và **đang phát triển** cho iOS và Android. Hiện chưa có trang trên cửa hàng hay ngày phát hành.
+Blushlab kết hợp studio trang điểm và chế độ Khuôn mặt của tôi trong một trò chơi. Trò chơi do **ipe()** (ipe Studio) thực hiện và **đang phát triển** cho iOS và Android. Hiện chưa có trang trên cửa hàng hay ngày phát hành.
 
 ## Nội dung
 

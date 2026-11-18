@@ -13,7 +13,7 @@ Wir antworten in der Regel innerhalb weniger Werktage.
 ## Hilfreiche Angaben
 
 - Gerätemodell und Version des Betriebssystems
-- Die App-Version
+- Die Spielversion
 - Was beim Auftreten des Problems passiert ist, gern mit Screenshot
 
 ## Häufige Fragen
@@ -28,4 +28,4 @@ Blushlab ist kostenlos zum Starten, und es gibt In-App-Käufe. Es gibt keine Wer
 
 ### Erhebt ihr persönliche Daten?
 
-Die Blushlab-App erhebt keine persönlichen Daten. Diese Website erfasst über Google Analytics grundlegende Besuchsstatistiken (Details in der [Datenschutzerklärung](/privacy/)) und hat keine Konten oder Werbung.
+Das Blushlab-Spiel erhebt keine persönlichen Daten. Diese Website erfasst über Google Analytics grundlegende Besuchsstatistiken (Details in der [Datenschutzerklärung](/privacy/)) und hat keine Konten oder Werbung.

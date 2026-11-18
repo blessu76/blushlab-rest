@@ -12,7 +12,7 @@ We aim to reply within a few business days.
 ## Helpful details to include
 
 - Your device model and operating system version
-- The app version
+- The game version
 - What was happening when the problem occurred, with a screenshot if you have one
 
 ## Frequently asked questions
@@ -27,4 +27,4 @@ Blushlab is free to start, and in-app purchases are available. There are no ads.
 
 ### Do you collect personal information?
 
-The Blushlab app does not collect personal information. This website collects basic visit statistics through Google Analytics (see the [Privacy Policy](/privacy/) for details), and has no accounts or ads.
+The Blushlab game does not collect personal information. This website collects basic visit statistics through Google Analytics (see the [Privacy Policy](/privacy/) for details), and has no accounts or ads.

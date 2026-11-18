@@ -71,19 +71,11 @@ class LangSelect(unittest.TestCase):
     def test_ipe_lang_js_is_the_kit_file(self):
         self.assertEqual((REPO / "assets" / "ipe-lang.js").read_text(encoding="utf-8"), bs.langswitch.JS.read_text(encoding="utf-8"))
 
-    def test_dropped_language_addresses_redirect(self):
-        want = {"pt": "pt-BR/", "zh": "zh-Hant/", "ar": "", "hi": "", "ru": ""}
-        for old, new in want.items():
-            for rest in bs.LEGACY_PATHS:
-                f = REPO / old / rest / "index.html"
-                self.assertTrue(f.is_file(), f)
-                h = f.read_text(encoding="utf-8")
-                self.assertIn('http-equiv="refresh"', h)
-                self.assertIn("noindex", h)
-                if rest == "":
-                    self.assertIn('rel="canonical" href="%s/%s"' % (bs.SITE, new), h)
+    def test_dropped_language_addresses_are_gone(self):
+        # retired addresses get no redirect page (404 is enough) and must not be in the sitemap
         sm = (REPO / "sitemap.xml").read_text(encoding="utf-8")
-        for old in want:
+        for old in ("pt", "zh", "ar", "hi", "ru"):
+            self.assertFalse((REPO / old).exists(), old)
             self.assertNotIn("%s/%s/" % (bs.SITE, old), sm)
 
 

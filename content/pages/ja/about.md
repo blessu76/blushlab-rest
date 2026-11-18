@@ -4,7 +4,7 @@ description: Blushlab は iOS と Android 向けのメイクスタジオと顔�
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab は、メイクスタジオとマイフェイスのモードを1つのアプリにまとめたゲームです。**ipe()**（ipe Studio）が制作し、iOS と Android 向けに**開発中**です。ストアページや公開日はまだありません。
+Blushlab は、メイクスタジオとマイフェイスのモードを1つのゲームにまとめたゲームです。**ipe()**（ipe Studio）が制作し、iOS と Android 向けに**開発中**です。ストアページや公開日はまだありません。
 
 ## 内容
 

@@ -13,7 +13,7 @@ Birkaç iş günü içinde yanıt vermeyi hedefliyoruz.
 ## Eklemeniz yararlı olacak bilgiler
 
 - Cihaz modeliniz ve işletim sistemi sürümünüz
-- Uygulamanın sürümü
+- Oyunun sürümü
 - Sorun oluştuğunda ne yaptığınız; varsa bir ekran görüntüsü
 
 ## Sık sorulan sorular
@@ -28,4 +28,4 @@ Blushlab ücretsiz başlanabilir ve uygulama içi satın almalar mevcuttur. Rekl
 
 ### Kişisel bilgi topluyor musunuz?
 
-Blushlab uygulaması kişisel bilgi toplamaz. Bu web sitesi Google Analytics ile temel ziyaret istatistikleri toplar (ayrıntılar için [Gizlilik Politikası](/privacy/) sayfasına bakın) ve hesap ya da reklam içermez.
+Blushlab oyunu kişisel bilgi toplamaz. Bu web sitesi Google Analytics ile temel ziyaret istatistikleri toplar (ayrıntılar için [Gizlilik Politikası](/privacy/) sayfasına bakın) ve hesap ya da reklam içermez.

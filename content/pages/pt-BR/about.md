@@ -4,7 +4,7 @@ description: O Blushlab é um estúdio de maquiagem e um jogo com fotos do rosto
 updated: 2026-11-19
 translation_of: en
 ---
-O Blushlab reúne um estúdio de maquiagem e o modo Meu rosto em um só aplicativo. Ele é feito pela **ipe()** (ipe Studio) e está **em desenvolvimento** para iOS e Android. Ainda não há página na loja nem data de lançamento.
+O Blushlab reúne um estúdio de maquiagem e o modo Meu rosto em um só jogo. Ele é feito pela **ipe()** (ipe Studio) e está **em desenvolvimento** para iOS e Android. Ainda não há página na loja nem data de lançamento.
 
 ## O que inclui
 

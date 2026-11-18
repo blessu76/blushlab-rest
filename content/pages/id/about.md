@@ -4,7 +4,7 @@ description: Blushlab adalah studio rias dan game dengan foto wajah untuk iOS da
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab menggabungkan studio rias dan mode Wajah Saya dalam satu aplikasi. Dibuat oleh **ipe()** (ipe Studio) dan **sedang dalam pengembangan** untuk iOS dan Android. Belum ada halaman toko atau tanggal rilis.
+Blushlab menggabungkan studio rias dan mode Wajah Saya dalam satu game. Dibuat oleh **ipe()** (ipe Studio) dan **sedang dalam pengembangan** untuk iOS dan Android. Belum ada halaman toko atau tanggal rilis.
 
 ## Isinya
 

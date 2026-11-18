@@ -13,7 +13,7 @@ Kami berusaha membalas dalam beberapa hari kerja.
 ## Informasi yang membantu
 
 - Model perangkat dan versi sistem operasi
-- Versi aplikasi
+- Versi game
 - Apa yang sedang terjadi saat masalah muncul, dengan tangkapan layar jika ada
 
 ## Pertanyaan yang sering diajukan
@@ -28,4 +28,4 @@ Blushlab gratis untuk dimulai, dan pembelian dalam aplikasi tersedia. Tidak ada 
 
 ### Apakah kalian mengumpulkan informasi pribadi?
 
-Aplikasi Blushlab tidak mengumpulkan informasi pribadi. Situs ini mengumpulkan statistik kunjungan dasar lewat Google Analytics (lihat [Kebijakan Privasi](/privacy/) untuk detail), dan tidak memiliki akun atau iklan.
+Game Blushlab tidak mengumpulkan informasi pribadi. Situs ini mengumpulkan statistik kunjungan dasar lewat Google Analytics (lihat [Kebijakan Privasi](/privacy/) untuk detail), dan tidak memiliki akun atau iklan.

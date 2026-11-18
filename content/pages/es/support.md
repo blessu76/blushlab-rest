@@ -13,7 +13,7 @@ Intentamos responder en unos pocos días laborables.
 ## Datos útiles que conviene incluir
 
 - Modelo de tu dispositivo y versión del sistema operativo
-- La versión de la app
+- La versión del juego
 - Qué estabas haciendo cuando ocurrió el problema, con una captura si la tienes
 
 ## Preguntas frecuentes
@@ -28,4 +28,4 @@ Blushlab es gratis para empezar y hay compras dentro de la app. No hay anuncios.
 
 ### ¿Recopilan datos personales?
 
-La app Blushlab no recopila datos personales. Este sitio web recopila estadísticas básicas de visitas con Google Analytics (consulta la [Política de privacidad](/privacy/) para más detalles) y no tiene cuentas ni anuncios.
+El juego Blushlab no recopila datos personales. Este sitio web recopila estadísticas básicas de visitas con Google Analytics (consulta la [Política de privacidad](/privacy/) para más detalles) y no tiene cuentas ni anuncios.

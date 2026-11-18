@@ -12,7 +12,7 @@ Blushlab is a casual makeup game by ipe() (https://ipe.rest/). It is in developm
 
 ## Privacy
 
-- The Blushlab app does not send photos to a server.
+- The Blushlab game does not send photos to a server.
 - This website collects only basic visit statistics through Google Analytics and has no ads; see the privacy policy.
 
 ## Pages
@@ -22,7 +22,7 @@ Blushlab is a casual makeup game by ipe() (https://ipe.rest/). It is in developm
 - [Support](https://blushlab.ipe.rest/support/): contact and questions
 - [Privacy Policy](https://blushlab.ipe.rest/privacy/)
 - [Terms of Use](https://blushlab.ipe.rest/terms/)
-- [Journal](https://blushlab.ipe.rest/journal/): notes from the making of the app
+- [Journal](https://blushlab.ipe.rest/journal/): notes from the making of the game
 - [RSS](https://blushlab.ipe.rest/journal/feed.xml)
 
 ## Journal posts (English)

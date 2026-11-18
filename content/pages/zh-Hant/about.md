@@ -4,7 +4,7 @@ description: Blushlab 是 iOS 與 Android 的妝容工作室與臉部照片遊�
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab 是一款把妝容工作室與「我的臉」模式合併在同一個應用程式中的遊戲。由 **ipe()**（ipe Studio）製作，目前為 iOS 與 Android **開發中**。目前尚無商店頁面與上市日期。
+Blushlab 是一款把妝容工作室與「我的臉」模式合併在同一款遊戲中。由 **ipe()**（ipe Studio）製作，目前為 iOS 與 Android **開發中**。目前尚無商店頁面與上市日期。
 
 ## 包含內容
 

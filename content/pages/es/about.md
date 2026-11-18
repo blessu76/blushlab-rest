@@ -4,7 +4,7 @@ description: Blushlab es un estudio de maquillaje y un juego con fotos del rostr
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab es un juego que reúne un estudio de maquillaje y un modo Mi cara en una sola app. Lo crea **ipe()** (ipe Studio) y está **en desarrollo** para iOS y Android. Todavía no hay página en la tienda ni fecha de lanzamiento.
+Blushlab es un juego que reúne un estudio de maquillaje y un modo Mi cara en un solo juego. Lo crea **ipe()** (ipe Studio) y está **en desarrollo** para iOS y Android. Todavía no hay página en la tienda ni fecha de lanzamiento.
 
 ## Qué incluye
 

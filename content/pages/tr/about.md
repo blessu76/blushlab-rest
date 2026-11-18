@@ -4,7 +4,7 @@ description: Blushlab, iOS ve Android için bir makyaj stüdyosu ve yüz fotoğr
 updated: 2026-11-19
 translation_of: en
 ---
-Blushlab, bir makyaj stüdyosunu ve Yüzüm modunu tek bir uygulamada birleştiren bir oyundur. **ipe()** (ipe Studio) tarafından yapılır ve iOS ve Android için **geliştirme aşamasındadır**. Henüz bir mağaza sayfası ya da yayın tarihi yok.
+Blushlab, bir makyaj stüdyosunu ve Yüzüm modunu tek bir oyunda birleştiren bir oyundur. **ipe()** (ipe Studio) tarafından yapılır ve iOS ve Android için **geliştirme aşamasındadır**. Henüz bir mağaza sayfası ya da yayın tarihi yok.
 
 ## İçerdikleri
 

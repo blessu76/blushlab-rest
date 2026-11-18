@@ -13,7 +13,7 @@ Chúng tôi cố gắng phản hồi trong vài ngày làm việc.
 ## Thông tin hữu ích nên gửi kèm
 
 - Mẫu thiết bị và phiên bản hệ điều hành
-- Phiên bản ứng dụng
+- Phiên bản trò chơi
 - Bạn đang làm gì khi sự cố xảy ra, kèm ảnh chụp màn hình nếu có
 
 ## Câu hỏi thường gặp
@@ -28,4 +28,4 @@ Blushlab có thể bắt đầu miễn phí, và có mua hàng trong ứng dụn
 
 ### Bạn có thu thập thông tin cá nhân không?
 
-Ứng dụng Blushlab không thu thập thông tin cá nhân. Trang web này thu thập thống kê truy cập cơ bản qua Google Analytics (xem [Chính sách quyền riêng tư](/privacy/) để biết chi tiết) và không có tài khoản hay quảng cáo.
+Trò chơi Blushlab không thu thập thông tin cá nhân. Trang web này thu thập thống kê truy cập cơ bản qua Google Analytics (xem [Chính sách quyền riêng tư](/privacy/) để biết chi tiết) và không có tài khoản hay quảng cáo.
