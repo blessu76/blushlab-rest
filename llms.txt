@@ -25,6 +25,14 @@ Blushlab is a casual makeup game by ipe() (https://ipe.rest/). It is in developm
 - [Journal](https://blushlab.ipe.rest/journal/): notes from the making of the game
 - [RSS](https://blushlab.ipe.rest/journal/feed.xml)
 
+## Journal posts (English)
+
+- [We settled on the name Blushlab](https://blushlab.ipe.rest/journal/naming-blushlab/) — 2026-11-19 — The working name glowroom became Blushlab. Here is why.
+
+## Journal posts (한국어)
+
+- [블러쉬랩으로 이름을 정했습니다](https://blushlab.ipe.rest/ko/journal/naming-blushlab/) — 2026-11-19 — 작업명 glowroom 대신 블러쉬랩으로 확정한 이야기입니다.
+
 Every journal post ends with an FAQ section. Feeds: https://blushlab.ipe.rest/journal/feed.xml (English), https://blushlab.ipe.rest/ko/journal/feed.xml (한국어).
 
 ## Languages

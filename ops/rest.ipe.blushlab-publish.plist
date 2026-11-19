@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- blushlab.ipe.rest journal: random-afternoon slot gate. Runs every 15 min, KST 12:00-18:45 (the Mac's timezone is KST).
+     NOT installed by the repo. Needs a dedicated clone at ~/.ipe/blushlab-publish/repo with push access to origin main:
+       git clone <blushlab-rest origin> ~/.ipe/blushlab-publish/repo && python3 ~/.ipe/blushlab-publish/repo/scripts/kit_lock.py sync --kit ~/Developer/ipe_web_kit
+     Install: mkdir -p ~/.ipe/logs && cp ops/rest.ipe.blushlab-publish.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/rest.ipe.blushlab-publish.plist
+     Kill switch: launchctl bootout gui/$(id -u)/rest.ipe.blushlab-publish -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>rest.ipe.blushlab-publish</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/davy.kim/.ipe/blushlab-publish/repo/ops/slot_gate.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>45</integer></dict>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/davy.kim/.ipe/logs/blushlab-publish.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/davy.kim/.ipe/logs/blushlab-publish.log</string>
+</dict>
+</plist>

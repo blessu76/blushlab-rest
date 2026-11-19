@@ -14,7 +14,8 @@ POST_FIELDS = ("headline", "author", "datePublished", "dateModified", "inLanguag
 
 
 def post_pages():
-    for slug_dir in sorted((REPO / "journal").glob("*/index.html")) + sorted((REPO / "ko" / "journal").glob("*/index.html")):
+    dirs = [REPO / "journal"] + [REPO / l / "journal" for l in bs.LANGS if l != "en"]
+    for slug_dir in [f for d in dirs for f in sorted(d.glob("*/index.html"))]:
         if slug_dir.parent.name == "page":
             continue
         yield slug_dir
@@ -40,7 +41,7 @@ class JsonLd(unittest.TestCase):
         if not (REPO / "content" / "journal").is_dir():
             self.skipTest("no journal posts yet")
         pages = list(post_pages())
-        self.assertGreaterEqual(len(pages), 26)
+        self.assertGreaterEqual(len(pages), len(bs.LANGS))  # at least one post in every language
         for f in pages:
             node = next((x for x in graph_of(f) if x["@type"] == "BlogPosting"), None)
             self.assertIsNotNone(node, f)
