@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Makeup Studio có bảy loại công cụ: phấn mắt, kẻ mắt, mi giả, má hồng, son môi, chân mày và lens. Bạn áp dụng từng bước một.
 
-My Face dùng cùng các công cụ đó trên ảnh của chính bạn, và ảnh chỉ nằm trên thiết bị của bạn.
+My Face dùng cùng các công cụ đó trên ảnh của chính bạn. Trong bản dựng hiện tại, ảnh chỉ được xử lý trên thiết bị của bạn.
 
 ## Câu hỏi thường gặp
 
@@ -19,7 +19,7 @@ Phấn mắt, kẻ mắt, mi giả, má hồng, son môi, chân mày và lens.
 
 ### Tôi có thể dùng trên ảnh của mình không?
 
-Có, trong My Face. Ảnh chỉ được xử lý trên thiết bị của bạn.
+Có, trong My Face. Trong bản dựng hiện tại, ảnh chỉ được xử lý trên thiết bị của bạn.
 
 ### Blushlab đã phát hành chưa?
 

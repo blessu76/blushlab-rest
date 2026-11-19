@@ -14,9 +14,14 @@ Each tick:
      with `published:` = today + the slot time, then build_site.py -> scripts/check.sh -> git commit -> git push origin main.
      On success published = true. A post already dated today in content/journal also sets published = true (one post a day).
   4. empty queue -> log and stop. A queue of 2 or fewer posts logs a warning (STOCK_ALERT file in the base dir).
-  5. a failed check/build restores the working tree and retries next tick; a failed push leaves FAILED in the base dir (human needed).
+  5. a failed check/build restores the working tree and retries next tick. A failed commit or push leaves FAILED in the base dir
+     (human needed) and fires a macOS notification. "Already published today" is judged on origin/main after `git fetch`.
 
-  python3 ops/slot_gate.py --status        # next scheduled time + queue, touches nothing
+  ⚠️ This script runs ONLY in its dedicated clone ~/.ipe/blushlab-publish/repo. The publish path does `git reset --hard` and
+     `git clean` to recover, so nobody works by hand in that clone. Without an explicit --repo, a run from any other
+     checkout is refused (--status is read-only and always allowed).
+
+  python3 ops/slot_gate.py --status --repo .   # next scheduled time + queue, touches nothing
   python3 ops/slot_gate.py                 # normal tick
   python3 ops/slot_gate.py --roll-only     # only (re)draw the slot for --now's date
   python3 ops/slot_gate.py --now 2026-11-20T13:00:00+09:00 --dry-run   # test knobs: plans only, changes nothing
@@ -36,9 +41,11 @@ KST = dt.timezone(dt.timedelta(hours=9))
 LANGS = ("en", "ko", "ja", "zh-Hant", "es", "pt-BR", "fr", "de", "id", "th", "vi", "tr")
 SLOTS = ["%02d:%02d" % (h, m) for h in range(12, 19) for m in (0, 15, 30, 45)]  # 12:00 .. 18:45
 MIN_STOCK = 3  # warn when the queue holds fewer than this
+WINDOW_END = dt.time(18, 45)  # last slot; a missed slot is published only up to this clock time
 REPO = Path(__file__).resolve().parent.parent
 HOME = Path.home() / ".ipe"
 DEFAULT_BASE = HOME / "blushlab-publish"
+DEDICATED_REPO = DEFAULT_BASE / "repo"  # the only clone a publishing run may touch
 QUEUE_RE = re.compile(r"^(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 
@@ -86,15 +93,19 @@ def decide(now, state):
     if state.get("published"):
         return "published", "today's post is already out (%s)" % state.get("time")
     hh, mm = state["time"].split(":")
-    if now.timetz().replace(tzinfo=None) < dt.time(int(hh), int(mm)):
+    clock = now.timetz().replace(tzinfo=None)
+    if clock < dt.time(int(hh), int(mm)):
         return "wait", "slot opens at %s" % state["time"]
+    if clock > WINDOW_END:  # a slot missed while the Mac slept: publish only inside the window
+        return "expired", "slot %s missed and the window closed at %s — nothing today" % (state["time"], WINDOW_END.strftime("%H:%M"))
     return "due", "slot %s reached (%s)" % (state["time"], now.strftime("%H:%M"))
 
 
 def next_slot(now, state):
     """-> (datetime, text) of the next scheduled publish. After today's slot is used (or passed unpublished with an empty queue) -> tomorrow, time not drawn yet."""
     now = now.astimezone(KST)
-    if state and state.get("date") == now.date().isoformat() and not state.get("published"):
+    if (state and state.get("date") == now.date().isoformat() and not state.get("published")
+            and now.timetz().replace(tzinfo=None) <= WINDOW_END):
         hh, mm = state["time"].split(":")
         return dt.datetime.combine(now.date(), dt.time(int(hh), int(mm)), tzinfo=KST), "today"
     tomorrow = now.date() + dt.timedelta(days=1)
@@ -178,10 +189,54 @@ def run(cmd, cwd, what):
     return r.stdout
 
 
+def origin_post_dated(repo, day, remote="origin", branch="main"):
+    """slug of a journal post dated `day` on <remote>/<branch> (after a fetch), else None. Local-only commits do not count."""
+    run(["git", "fetch", "--quiet", remote], repo, "git fetch")
+    ref = "%s/%s" % (remote, branch)
+    r = subprocess.run(["git", "grep", "-l", "-E", "^published:[[:space:]]*%s" % day.isoformat(), ref, "--", "content/journal/*/en.md"],
+                       cwd=str(repo), capture_output=True, text=True)
+    if r.returncode not in (0, 1):  # 1 = no match
+        raise SoftFail("git grep origin failed: %s" % r.stderr.strip()[-300:])
+    for line in r.stdout.splitlines():  # "origin/main:content/journal/<slug>/en.md"
+        path = line.split(":", 1)[-1].split("/")
+        if len(path) == 4 and path[:2] == ["content", "journal"]:
+            return path[2]
+    return None
+
+
+def guard_repo(repo, explicit):
+    """None when a publishing run may use `repo`, else the refusal text. --repo given explicitly (tests) is allowed."""
+    if explicit or Path(repo).resolve() == DEDICATED_REPO.resolve():
+        return None
+    return "refusing to publish from %s — only the dedicated clone %s may run this (test runs: pass --repo)" % (repo, DEDICATED_REPO)
+
+
+def notify(title, msg):
+    """macOS notification; never raises."""
+    esc = lambda s: str(s).replace("\\", "\\\\").replace('"', '\\"')[:200]
+    try:
+        subprocess.run(["osascript", "-e", 'display notification "%s" with title "%s"' % (esc(msg), esc(title))],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass
+
+
+def restore(repo):
+    """back to origin's HEAD: unstage, drop edits and the new journal files. Dedicated clone only (see module doc)."""
+    subprocess.run(["git", "reset", "-q", "--hard", "HEAD"], cwd=str(repo), capture_output=True)
+    subprocess.run(["git", "clean", "-fdq"], cwd=str(repo), capture_output=True)
+
+
 def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True):
-    """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | waiting | already"""
+    """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | waiting | already
+    Any failure after the first file change restores the clone. A commit or push failure is HardFail (a human looks)."""
     repo = Path(repo)
-    already = post_dated(repo, day)
+    if pull and not dry_run:
+        if run(["git", "status", "--porcelain"], repo, "git status").strip():
+            raise SoftFail("working tree is dirty — refusing to publish")
+        already = origin_post_dated(repo, day, remote, branch)  # judged on origin/main, not on this clone
+    else:
+        already = post_dated(repo, day)
     if already:
         return "already", already
     items = queue_items(repo)
@@ -195,8 +250,6 @@ def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pu
     if dry_run:
         return "published", "%s (dry-run, would stamp %s)" % (slug, iso)
     if pull:
-        if run(["git", "status", "--porcelain"], repo, "git status").strip():
-            raise SoftFail("working tree is dirty — refusing to publish")
         run(["git", "pull", "--rebase", remote, branch], repo, "git pull --rebase")
         src = repo / "content" / "queue" / src.name
         if not src.is_dir():
@@ -210,13 +263,16 @@ def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pu
         run([sys.executable, "scripts/build_site.py"], repo, "build_site.py")
         run(["bash", "scripts/check.sh"], repo, "check.sh")
     except Exception:
-        if pull:  # restore the clone: back to HEAD, drop the new files
-            subprocess.run(["git", "checkout", "--", "."], cwd=str(repo), capture_output=True)
-            subprocess.run(["git", "clean", "-fdq", "content", "journal", "ko", "ja", "zh-Hant", "es", "pt-BR", "fr", "de", "id", "th", "vi", "tr", "en"],
-                           cwd=str(repo), capture_output=True)
+        if pull:
+            restore(repo)
         raise
-    run(["git", "add", "-A"], repo, "git add")
-    run(["git", "commit", "-m", "journal: %s (%s)" % (slug, iso)], repo, "git commit")
+    try:
+        run(["git", "add", "-A"], repo, "git add")
+        run(["git", "commit", "-m", "journal: %s (%s)" % (slug, iso)], repo, "git commit")
+    except SoftFail as e:
+        if pull:
+            restore(repo)  # nothing staged, nothing half-written
+        raise HardFail("commit failed, clone restored: %s" % e)
     try:
         run(["git", "push", remote, branch], repo, "git push")
     except SoftFail as e:
@@ -261,11 +317,13 @@ class Gate:
         if roll_only:
             return "rolled-only", state["time"]
         action, why = decide(now, state)
-        if action in ("published", "wait"):
+        if action in ("published", "wait", "expired"):
             self.say("%s: %s" % (action, why))
             return action, why
         if (self.base / "FAILED").exists():
             self.say("FAILED file present — waiting for a human (%s)" % (self.base / "FAILED"))
+            if not self.kw.get("dry_run"):
+                notify("블러쉬랩 발행 멈춤", "FAILED 파일이 있어 발행을 멈췄습니다. 로그를 확인하세요.")
             return "blocked", "FAILED"
         self.say("due: " + why)
         self.warn_stock()
@@ -275,6 +333,8 @@ class Gate:
             self.say("HARD FAIL: %s" % e)
             self.base.mkdir(parents=True, exist_ok=True)
             (self.base / "FAILED").write_text("%s\n%s\n" % (now.isoformat(), e), encoding="utf-8")
+            if not self.kw.get("dry_run"):
+                notify("블러쉬랩 발행 실패", str(e)[:150])
             return "failed", str(e)
         except SoftFail as e:
             self.say("soft fail: %s (retry next tick)" % e)
@@ -332,7 +392,7 @@ def status(gate, state_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--repo", default=os.environ.get("BLUSHLAB_PUBLISH_REPO", str(REPO)))
+    ap.add_argument("--repo", default=None, help="publish clone (default: the dedicated clone; any other path needs this flag)")
     ap.add_argument("--base", default=os.environ.get("BLUSHLAB_PUBLISH_BASE", str(DEFAULT_BASE)), help="state dir: slot.json, FAILED, STOCK_ALERT")
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--now", help="ISO time with offset (test knob), e.g. 2026-11-20T13:00:00+09:00")
@@ -341,8 +401,15 @@ def main(argv=None):
     ap.add_argument("--roll-only", action="store_true")
     a = ap.parse_args(argv)
     state_path = Path(a.base) / "slot.json"
+    explicit = bool(a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO"))
+    repo = a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO") or str(DEDICATED_REPO)
+    if not a.status:
+        refusal = guard_repo(repo, explicit)
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return 2
     now_fn = (lambda: dt.datetime.fromisoformat(a.now)) if a.now else None
-    gate = Gate(state_path, a.repo, a.base, now_fn=now_fn, remote=a.remote, dry_run=a.dry_run)
+    gate = Gate(state_path, repo, a.base, now_fn=now_fn, remote=a.remote, dry_run=a.dry_run)
     if a.status:
         return status(gate, state_path)
     if a.dry_run:  # a dry run must not touch the real slot.json

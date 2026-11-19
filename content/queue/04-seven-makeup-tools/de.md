@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Das Makeup Studio bietet sieben Arten von Werkzeugen: Lidschatten, Eyeliner, Wimpern, Rouge, Lippenstift, Augenbrauen und Linsen. Du trägst sie Schritt für Schritt auf.
 
-My Face nutzt dieselben Werkzeuge auf deinem eigenen Foto, das auf deinem Gerät bleibt.
+My Face nutzt dieselben Werkzeuge auf deinem eigenen Foto. In der aktuellen Version wird es nur auf deinem Gerät verarbeitet.
 
 ## Häufige Fragen
 
@@ -19,7 +19,7 @@ Lidschatten, Eyeliner, Wimpern, Rouge, Lippenstift, Augenbrauen und Linsen.
 
 ### Kann ich sie auf meinem eigenen Foto nutzen?
 
-Ja, in My Face. Das Foto wird nur auf deinem Gerät verarbeitet.
+Ja, in My Face. In der aktuellen Version wird das Foto nur auf deinem Gerät verarbeitet.
 
 ### Ist Blushlab schon erschienen?
 

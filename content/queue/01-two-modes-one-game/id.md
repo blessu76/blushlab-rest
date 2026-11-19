@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Blushlab menggabungkan dua mode. Di Makeup Studio kamu memakaikan eyeshadow, eyeliner, bulu mata, blush, lipstik, alis, dan lensa pada karakter. Di My Face kamu memakai alat yang sama pada fotomu sendiri.
 
-Foto diproses di perangkatmu dan tidak dikirim ke server. Game ini tidak memiliki iklan.
+Di versi saat ini, foto hanya diproses di perangkatmu. Game ini tidak memiliki iklan.
 
 ## Pertanyaan umum
 
@@ -19,7 +19,7 @@ Makeup Studio yang memakai karakter, dan My Face yang memakai fotomu sendiri.
 
 ### Apakah fotoku diunggah?
 
-Tidak. Foto hanya diproses di perangkatmu.
+Tidak. Di versi saat ini, foto hanya diproses di perangkatmu.
 
 ### Apakah Blushlab sudah dirilis?
 

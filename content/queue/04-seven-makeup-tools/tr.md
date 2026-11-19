@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Makeup Studio size yedi çeşit araç sunar: far, eyeliner, kirpik, allık, ruj, kaş ve lens. Bunları adım adım uygularsınız.
 
-My Face aynı araçları kendi fotoğrafınızda kullanır; fotoğraf cihazınızda kalır.
+My Face aynı araçları kendi fotoğrafınızda kullanır. Mevcut sürümde fotoğraf yalnızca cihazınızda işlenir.
 
 ## Sık sorulan sorular
 
@@ -19,7 +19,7 @@ Far, eyeliner, kirpik, allık, ruj, kaş ve lens.
 
 ### Bunları kendi fotoğrafımda kullanabilir miyim?
 
-Evet, My Face'te. Fotoğraf yalnızca cihazınızda işlenir.
+Evet, My Face'te. Mevcut sürümde fotoğraf yalnızca cihazınızda işlenir.
 
 ### Blushlab çıktı mı?
 

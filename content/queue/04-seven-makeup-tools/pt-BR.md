@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 O Makeup Studio oferece sete tipos de ferramentas: sombra, delineador, cílios, blush, batom, sobrancelhas e lentes. Você as aplica passo a passo.
 
-O My Face usa as mesmas ferramentas na sua própria foto, que fica no seu dispositivo.
+O My Face usa as mesmas ferramentas na sua própria foto. Na versão atual, ela é processada apenas no seu dispositivo.
 
 ## Perguntas frequentes
 
@@ -19,7 +19,7 @@ Sombra, delineador, cílios, blush, batom, sobrancelhas e lentes.
 
 ### Posso usá-las na minha própria foto?
 
-Sim, no My Face. A foto é processada apenas no seu dispositivo.
+Sim, no My Face. Na versão atual, a foto é processada apenas no seu dispositivo.
 
 ### O Blushlab já foi lançado?
 

@@ -8,7 +8,7 @@ keywords: Blushlab
 ---
 Blushlab combines two modes. Makeup Studio lets you apply shadow, liner, lashes, blush, lip, brows and lenses to a character. My Face lets you use the same tools on your own photo.
 
-Photos are processed on your device and are not sent to a server. The game has no ads.
+In the current build, photos are handled only on your device. The game has no ads.
 
 ## FAQ
 
@@ -18,7 +18,7 @@ Makeup Studio, which uses a character, and My Face, which uses your own photo.
 
 ### Is my photo uploaded?
 
-No. Photos are processed only on your device.
+No. In the current build, photos are handled only on your device.
 
 ### Is Blushlab out yet?
 

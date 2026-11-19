@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Makeup Studio memberimu tujuh jenis alat: eyeshadow, eyeliner, bulu mata, blush, lipstik, alis, dan lensa. Kamu memakainya langkah demi langkah.
 
-My Face memakai alat yang sama pada fotomu sendiri, yang tetap berada di perangkatmu.
+My Face memakai alat yang sama pada fotomu sendiri. Di versi saat ini, foto hanya diproses di perangkatmu.
 
 ## Pertanyaan umum
 
@@ -19,7 +19,7 @@ Eyeshadow, eyeliner, bulu mata, blush, lipstik, alis, dan lensa.
 
 ### Bisakah dipakai pada fotoku sendiri?
 
-Bisa, di My Face. Foto hanya diproses di perangkatmu.
+Bisa, di My Face. Di versi saat ini, foto hanya diproses di perangkatmu.
 
 ### Apakah Blushlab sudah dirilis?
 

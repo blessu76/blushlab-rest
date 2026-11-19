@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Blushlab vereint zwei Modi. Im Makeup Studio trägst du Lidschatten, Eyeliner, Wimpern, Rouge, Lippenstift, Augenbrauen und Linsen auf eine Figur auf. In My Face nutzt du dieselben Werkzeuge auf deinem eigenen Foto.
 
-Fotos werden auf deinem Gerät verarbeitet und nicht an einen Server gesendet. Das Spiel hat keine Werbung.
+In der aktuellen Version werden Fotos nur auf deinem Gerät verarbeitet. Das Spiel hat keine Werbung.
 
 ## Häufige Fragen
 
@@ -19,7 +19,7 @@ Makeup Studio mit einer Figur und My Face mit deinem eigenen Foto.
 
 ### Wird mein Foto hochgeladen?
 
-Nein. Fotos werden nur auf deinem Gerät verarbeitet.
+Nein. In der aktuellen Version werden Fotos nur auf deinem Gerät verarbeitet.
 
 ### Ist Blushlab schon erschienen?
 

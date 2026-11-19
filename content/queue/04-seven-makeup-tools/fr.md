@@ -9,7 +9,7 @@ keywords: Blushlab
 ---
 Makeup Studio propose sept types d'outils : ombre à paupières, eye-liner, cils, blush, rouge à lèvres, sourcils et lentilles. Vous les appliquez étape par étape.
 
-My Face utilise les mêmes outils sur votre propre photo, qui reste sur votre appareil.
+My Face utilise les mêmes outils sur votre propre photo. Dans la version actuelle, elle n'est traitée que sur votre appareil.
 
 ## Questions fréquentes
 
@@ -19,7 +19,7 @@ Ombre à paupières, eye-liner, cils, blush, rouge à lèvres, sourcils et lenti
 
 ### Puis-je les utiliser sur ma propre photo ?
 
-Oui, dans My Face. La photo est traitée uniquement sur votre appareil.
+Oui, dans My Face. Dans la version actuelle, la photo n'est traitée que sur votre appareil.
 
 ### Blushlab est-il déjà sorti ?
 

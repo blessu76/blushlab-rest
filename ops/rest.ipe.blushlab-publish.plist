@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- blushlab.ipe.rest journal: random-afternoon slot gate. Runs every 15 min, KST 12:00-18:45 (the Mac's timezone is KST).
+     ⚠️ This job publishes ONLY from its dedicated clone ~/.ipe/blushlab-publish/repo (recovery runs git reset --hard / git clean there).
+     Do NOT work by hand in that clone, and do not point this job at any other checkout.
+     RunAtLoad: a load/login during the window runs a tick at once; a slot missed while asleep is published only before 18:45.
      NOT installed by the repo. Needs a dedicated clone at ~/.ipe/blushlab-publish/repo with push access to origin main:
        git clone <blushlab-rest origin> ~/.ipe/blushlab-publish/repo && python3 ~/.ipe/blushlab-publish/repo/scripts/kit_lock.py sync --kit ~/Developer/ipe_web_kit
      Install: mkdir -p ~/.ipe/logs && cp ops/rest.ipe.blushlab-publish.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/rest.ipe.blushlab-publish.plist
@@ -45,6 +48,8 @@
     <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>
     <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>45</integer></dict>
   </array>
+  <key>RunAtLoad</key>
+  <true/>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>

@@ -8,7 +8,7 @@ keywords: Blushlab
 ---
 Makeup Studio gives you seven kinds of tools: shadow, liner, lashes, blush, lip, brows and lenses. You apply them step by step.
 
-My Face uses the same tools on your own photo, which stays on your device.
+My Face uses the same tools on your own photo. In the current build, it is handled only on your device.
 
 ## FAQ
 
@@ -18,7 +18,7 @@ Shadow, liner, lashes, blush, lip, brows and lenses.
 
 ### Can I use them on my own photo?
 
-Yes, in My Face. The photo is processed only on your device.
+Yes, in My Face. In the current build, the photo is handled only on your device.
 
 ### Is Blushlab out yet?
 
