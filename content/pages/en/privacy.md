@@ -1,17 +1,17 @@
 ---
 title: Privacy Policy
-description: Privacy policy for Blushlab. The app collects no personal information. The website collects basic visit statistics through Google Analytics.
+description: Privacy policy for Blushlab. The game collects no personal information. The website collects basic visit statistics through Google Analytics.
 updated: 2026-11-19
 ---
-**In short:** the Blushlab app collects no personal information. This website collects basic visit statistics through Google Analytics, remembers your language in your own browser, and asks for no name, email or account. Neither shows ads, and we do not sell data.
+**In short:** the Blushlab game collects no personal information. This website collects basic visit statistics through Google Analytics, remembers your language in your own browser, and asks for no name, email or account. Neither shows ads, and we do not sell data.
 
 Effective date: {{EFFECTIVE}} · Operator: {{OPERATOR}}
 
 ## 1. Information we collect
 
-Blushlab ("the App") is a mobile game operated by an individual developer, {{OPERATOR}}. The App has no accounts or sign-in, and it does not collect or send to any server any personal information such as your name, email, contact details, location or device identifiers. Photos used in the My Face mode are processed only on your device and are not sent to a server. Your game progress and settings are stored only on your device and are deleted when you delete the App.
+Blushlab ("the Game") is a mobile game operated by an individual developer, {{OPERATOR}}. The Game has no accounts or sign-in, and it does not collect or send to any server any personal information such as your name, email, contact details, location or device identifiers. Photos used in the My Face mode are processed only on your device and are not sent to a server. Your game progress and settings are stored only on your device and are deleted when you delete the Game.
 
-The App contains no advertising, analytics or tracking SDKs. The website is different: it collects basic visit statistics through Google Analytics 4, as described in section 2.
+The Game contains no advertising, analytics or tracking SDKs. The website is different: it collects basic visit statistics through Google Analytics 4, as described in section 2.
 
 ## 2. The website
 
@@ -40,15 +40,15 @@ The site is hosted on GitHub Pages. Like any host, it receives technical request
 
 ## 3. Third parties
 
-Google (analytics and fonts) and GitHub (hosting) process data for the website as described above. We do not sell your information, and we do not share it with anyone else except where the law requires. The App is distributed through the Apple App Store and Google Play; information related to downloads is handled by each store under its own privacy policy.
+Google (analytics and fonts) and GitHub (hosting) process data for the website as described above. We do not sell your information, and we do not share it with anyone else except where the law requires. The Game is distributed through the Apple App Store and Google Play; information related to downloads is handled by each store under its own privacy policy.
 
 ## 4. Questions and your rights
 
-To request access, correction, deletion or suspension of processing of your personal information, or to ask any question, write to [{{EMAIL}}](mailto:{{EMAIL}}). We reply within 10 days. The App holds no personal information, and website analytics data is not tied to your name or email, so we usually cannot find an individual in it; email correspondence we can locate and delete.
+To request access, correction, deletion or suspension of processing of your personal information, or to ask any question, write to [{{EMAIL}}](mailto:{{EMAIL}}). We reply within 10 days. The Game holds no personal information, and website analytics data is not tied to your name or email, so we usually cannot find an individual in it; email correspondence we can locate and delete.
 
 ## 5. Children
 
-The App is not directed to children under 14 (or the minimum age in your region), and we do not knowingly collect personal information from children. The App collects none, and the website asks for none.
+The Game is not directed to children under 14 (or the minimum age in your region), and we do not knowingly collect personal information from children. The Game collects none, and the website asks for none.
 
 ## 6. Privacy officer
 
@@ -62,4 +62,4 @@ Name: {{OPERATOR}} · Contact: [{{EMAIL}}](mailto:{{EMAIL}})
 
 ## 8. Changes
 
-If the App or the website later adds accounts or online features that change what is collected, we will update this policy first and change the effective date. Current version: {{EFFECTIVE}}.
+If the Game or the website later adds accounts or online features that change what is collected, we will update this policy first and change the effective date. Current version: {{EFFECTIVE}}.
