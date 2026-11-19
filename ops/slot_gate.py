@@ -4,22 +4,33 @@
 One post a day, at a random time in 12:00-18:45 KST (15-minute steps) whose hour is never the same as yesterday's.
 launchd (ops/rest.ipe.blushlab-publish.plist, every 15 min 12:00-18:45 KST) runs this script; most ticks do nothing.
 
-State file (default ~/.ipe/blushlab-publish/slot.json):
-  {"date": "YYYY-MM-DD", "time": "HH:MM", "prev_date": ..., "prev_time": ..., "published": true|false}
+State files in the base dir (default ~/.ipe/blushlab-publish/):
+  slot.json   {"date": "YYYY-MM-DD", "time": "HH:MM", "prev_date": ..., "prev_time": ..., "published": true|false}
+  FAILED      present = a human must look; publishing stops until it is removed
+  alerts.json last macOS notice day per alert key (FAILED, MISSED, NOCLONE) — each key notifies at most once a day
+  STOCK_ALERT queue is short (2 or fewer posts)
 
 Each tick:
   1. slot.json date is not today -> draw a new time (hour != yesterday's); yesterday's date/time move to prev_*.
+     A previous day that was never published -> one MISSED notice.
   2. published already true -> nothing.   now < time -> wait.
-  3. otherwise publish the FIRST queue post (content/queue/NN-slug/, all 12 languages): it is moved to content/journal/<slug>/
-     with `published:` = today + the slot time, then build_site.py -> scripts/check.sh -> git commit -> git push origin main.
+     now after the window end (18:45, judged to the minute: 18:45:30 is still inside) -> expired, MISSED notice once.
+  3. otherwise publish the FIRST queue post (content/queue/NN-slug/, all 12 languages). The head is never skipped: an
+     incomplete head is a SoftFail (retry next tick). It is moved to content/journal/<slug>/ with `published:` = today +
+     the slot time, then build_site.py -> scripts/check.sh -> git commit -> git push origin main.
      On success published = true. A post already dated today in content/journal also sets published = true (one post a day).
   4. empty queue -> log and stop. A queue of 2 or fewer posts logs a warning (STOCK_ALERT file in the base dir).
-  5. a failed check/build restores the working tree and retries next tick. A failed commit or push leaves FAILED in the base dir
-     (human needed) and fires a macOS notification. "Already published today" is judged on origin/main after `git fetch`.
+  5. A publish run refuses to start while this clone has commits that origin/main does not (an earlier push did not go
+     through). The pull is part of the restored step: a pull failure aborts the rebase and retries next tick.
+     A failed check/build/pull restores the working tree (when reset is allowed) and retries next tick.
+     Any unexpected exception is logged with its traceback, restored the same way, and retried next tick.
+     A failed commit restores the tree and is a HardFail (FAILED). A failed push keeps the local commit, writes its hash to
+     FAILED, and is a HardFail: a human pushes or drops that commit, then removes FAILED.
+     "Already published today" is judged on origin/main after `git fetch`.
 
-  ⚠️ This script runs ONLY in its dedicated clone ~/.ipe/blushlab-publish/repo. The publish path does `git reset --hard` and
-     `git clean` to recover, so nobody works by hand in that clone. Without an explicit --repo, a run from any other
-     checkout is refused (--status is read-only and always allowed).
+  ⚠️ The default repo is the dedicated clone ~/.ipe/blushlab-publish/repo. Recovery runs `git reset --hard` and `git clean`,
+     so nobody works by hand in that clone. --repo and BLUSHLAB_PUBLISH_REPO are for tests: they pick another clone, and
+     a publish run there resets or cleans only with --allow-reset. A missing clone is logged and notified, not a crash.
 
   python3 ops/slot_gate.py --status --repo .   # next scheduled time + queue, touches nothing
   python3 ops/slot_gate.py                 # normal tick
@@ -35,17 +46,18 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 KST = dt.timezone(dt.timedelta(hours=9))
 LANGS = ("en", "ko", "ja", "zh-Hant", "es", "pt-BR", "fr", "de", "id", "th", "vi", "tr")
 SLOTS = ["%02d:%02d" % (h, m) for h in range(12, 19) for m in (0, 15, 30, 45)]  # 12:00 .. 18:45
 MIN_STOCK = 3  # warn when the queue holds fewer than this
-WINDOW_END = dt.time(18, 45)  # last slot; a missed slot is published only up to this clock time
+WINDOW_END = dt.time(18, 45)  # last slot; a missed slot is published only up to this clock time (minute precision)
 REPO = Path(__file__).resolve().parent.parent
 HOME = Path.home() / ".ipe"
 DEFAULT_BASE = HOME / "blushlab-publish"
-DEDICATED_REPO = DEFAULT_BASE / "repo"  # the only clone a publishing run may touch
+DEDICATED_REPO = DEFAULT_BASE / "repo"  # the default publishing clone
 QUEUE_RE = re.compile(r"^(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 
 
@@ -64,6 +76,11 @@ def hour_of(hm):
         return int(str(hm).split(":", 1)[0])
     except (ValueError, TypeError):
         return None
+
+
+def minute_clock(now):
+    """wall clock at minute precision: seconds never count (18:45:30 is still the 18:45 slot)."""
+    return dt.time(now.hour, now.minute)
 
 
 def draw_time(rng, avoid_hour=None):
@@ -88,12 +105,12 @@ def roll(state, today, rng):
 
 
 def decide(now, state):
-    """-> (action, why). action: published | wait | due. `now` is an aware datetime."""
+    """-> (action, why). action: published | wait | due | expired. `now` is an aware datetime."""
     now = now.astimezone(KST)
     if state.get("published"):
         return "published", "today's post is already out (%s)" % state.get("time")
     hh, mm = state["time"].split(":")
-    clock = now.timetz().replace(tzinfo=None)
+    clock = minute_clock(now)
     if clock < dt.time(int(hh), int(mm)):
         return "wait", "slot opens at %s" % state["time"]
     if clock > WINDOW_END:  # a slot missed while the Mac slept: publish only inside the window
@@ -105,7 +122,7 @@ def next_slot(now, state):
     """-> (datetime, text) of the next scheduled publish. After today's slot is used (or passed unpublished with an empty queue) -> tomorrow, time not drawn yet."""
     now = now.astimezone(KST)
     if (state and state.get("date") == now.date().isoformat() and not state.get("published")
-            and now.timetz().replace(tzinfo=None) <= WINDOW_END):
+            and minute_clock(now) <= WINDOW_END):
         hh, mm = state["time"].split(":")
         return dt.datetime.combine(now.date(), dt.time(int(hh), int(mm)), tzinfo=KST), "today"
     tomorrow = now.date() + dt.timedelta(days=1)
@@ -132,6 +149,14 @@ def queue_items(root):
 
 def ready_items(root):
     return [(d, s) for d, s, miss in queue_items(root) if not miss]
+
+
+def queue_head(root):
+    """(dir, slug) of the first queue entry. The order is never skipped: an incomplete head is a SoftFail. Queue must not be empty."""
+    d, slug, miss = queue_items(root)[0]
+    if miss:
+        raise SoftFail("queue head %s is incomplete (missing %s) — waiting, order kept" % (d.name, ",".join(miss)))
+    return d, slug
 
 
 def stamp_published(text, iso):
@@ -189,9 +214,26 @@ def run(cmd, cwd, what):
     return r.stdout
 
 
-def origin_post_dated(repo, day, remote="origin", branch="main"):
-    """slug of a journal post dated `day` on <remote>/<branch> (after a fetch), else None. Local-only commits do not count."""
+def fetch(repo, remote="origin"):
     run(["git", "fetch", "--quiet", remote], repo, "git fetch")
+
+
+def local_ahead(repo, remote="origin", branch="main"):
+    """short hashes of commits on this clone's HEAD that <remote>/<branch> does not have (call after fetch)."""
+    out = run(["git", "log", "--format=%h", "%s/%s..HEAD" % (remote, branch)], repo, "git log")
+    return out.split()
+
+
+def pull_rebase(repo, remote="origin", branch="main"):
+    try:
+        run(["git", "pull", "--rebase", remote, branch], repo, "git pull --rebase")
+    except SoftFail:
+        subprocess.run(["git", "rebase", "--abort"], cwd=str(repo), capture_output=True)  # no-op when no rebase is running
+        raise
+
+
+def origin_post_dated(repo, day, remote="origin", branch="main"):
+    """slug of a journal post dated `day` on <remote>/<branch> (call after fetch), else None. Local-only commits do not count."""
     ref = "%s/%s" % (remote, branch)
     r = subprocess.run(["git", "grep", "-l", "-E", "^published:[[:space:]]*%s" % day.isoformat(), ref, "--", "content/journal/*/en.md"],
                        cwd=str(repo), capture_output=True, text=True)
@@ -205,7 +247,7 @@ def origin_post_dated(repo, day, remote="origin", branch="main"):
 
 
 def guard_repo(repo, explicit):
-    """None when a publishing run may use `repo`, else the refusal text. --repo given explicitly (tests) is allowed."""
+    """None when a publishing run may use `repo`, else the refusal text. The default is the dedicated clone; another path needs --repo (tests)."""
     if explicit or Path(repo).resolve() == DEDICATED_REPO.resolve():
         return None
     return "refusing to publish from %s — only the dedicated clone %s may run this (test runs: pass --repo)" % (repo, DEDICATED_REPO)
@@ -222,40 +264,40 @@ def notify(title, msg):
 
 
 def restore(repo):
-    """back to origin's HEAD: unstage, drop edits and the new journal files. Dedicated clone only (see module doc)."""
+    """back to HEAD: unstage, drop edits and the new journal files. Only when reset is allowed (see publish_one / --allow-reset)."""
     subprocess.run(["git", "reset", "-q", "--hard", "HEAD"], cwd=str(repo), capture_output=True)
     subprocess.run(["git", "clean", "-fdq"], cwd=str(repo), capture_output=True)
 
 
-def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True):
-    """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | waiting | already
-    Any failure after the first file change restores the clone. A commit or push failure is HardFail (a human looks)."""
+def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True, allow_reset=False):
+    """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | already
+    A failure after the first file change restores the clone when allow_reset is set. A commit or push failure is HardFail
+    (a human looks); a push failure keeps the local commit, which then blocks every later run until it is resolved."""
     repo = Path(repo)
     if pull and not dry_run:
         if run(["git", "status", "--porcelain"], repo, "git status").strip():
             raise SoftFail("working tree is dirty — refusing to publish")
+        fetch(repo, remote)
+        ahead = local_ahead(repo, remote, branch)
+        if ahead:
+            raise HardFail("%d local commit(s) not on %s/%s (%s) — an earlier push did not go through. Push or drop them in the clone, then remove FAILED"
+                           % (len(ahead), remote, branch, ", ".join(ahead)))
         already = origin_post_dated(repo, day, remote, branch)  # judged on origin/main, not on this clone
     else:
         already = post_dated(repo, day)
     if already:
         return "already", already
-    items = queue_items(repo)
-    if not items:
+    if not queue_items(repo):
         return "empty", None
-    ready = ready_items(repo)
-    if not ready:
-        return "waiting", None
-    src, slug = ready[0]
+    _, slug = queue_head(repo)  # SoftFail when the head is incomplete
     iso = published_iso(day, hm)
     if dry_run:
         return "published", "%s (dry-run, would stamp %s)" % (slug, iso)
-    if pull:
-        run(["git", "pull", "--rebase", remote, branch], repo, "git pull --rebase")
-        src = repo / "content" / "queue" / src.name
-        if not src.is_dir():
-            raise SoftFail("queue entry vanished after pull")
-    dest = repo / "content" / "journal" / slug
     try:
+        if pull:
+            pull_rebase(repo, remote, branch)
+        src, slug = queue_head(repo)  # re-checked after the pull: the queue may have moved
+        dest = repo / "content" / "journal" / slug
         dest.mkdir(parents=True)
         for l in LANGS:
             (dest / (l + ".md")).write_text(stamp_published((src / (l + ".md")).read_text(encoding="utf-8"), iso), encoding="utf-8")
@@ -263,20 +305,22 @@ def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pu
         run([sys.executable, "scripts/build_site.py"], repo, "build_site.py")
         run(["bash", "scripts/check.sh"], repo, "check.sh")
     except Exception:
-        if pull:
+        if allow_reset:
             restore(repo)
         raise
     try:
         run(["git", "add", "-A"], repo, "git add")
         run(["git", "commit", "-m", "journal: %s (%s)" % (slug, iso)], repo, "git commit")
     except SoftFail as e:
-        if pull:
+        if allow_reset:
             restore(repo)  # nothing staged, nothing half-written
-        raise HardFail("commit failed, clone restored: %s" % e)
+        raise HardFail("commit failed%s: %s" % (", clone restored" if allow_reset else "", e))
+    sha = run(["git", "rev-parse", "--short", "HEAD"], repo, "git rev-parse").strip()
     try:
         run(["git", "push", remote, branch], repo, "git push")
     except SoftFail as e:
-        raise HardFail(str(e))  # the commit exists locally: a human decides (rebase / retry)
+        raise HardFail("push failed — local commit %s kept (not on %s/%s). Push or drop it in the clone, then remove FAILED. %s"
+                       % (sha, remote, branch, e))
     return "published", slug
 
 
@@ -293,6 +337,28 @@ class Gate:
     def say(self, msg):
         self.log("[%s] %s" % (self.now().strftime("%Y-%m-%d %H:%M:%S KST"), msg))
 
+    def alert(self, key, title, msg, token=None):
+        """macOS notice at most once per `token` (default: today) for `key`; state in alerts.json. Dry runs never notify."""
+        if self.kw.get("dry_run"):
+            return
+        token = token or self.now().date().isoformat()
+        path = self.base / "alerts.json"
+        try:
+            seen = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (ValueError, OSError):
+            seen = {}
+        if not isinstance(seen, dict):
+            seen = {}
+        if seen.get(key) == token:
+            return
+        seen[key] = token
+        notify(title, msg)
+        try:
+            self.base.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(seen, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
     def warn_stock(self):
         n = len(ready_items(self.repo))
         msg = stock_warning(n)
@@ -307,23 +373,30 @@ class Gate:
         return n
 
     def tick(self, roll_only=False):
-        """-> (action, detail). action: rolled-only | published | wait | published-now | already | empty | waiting | blocked | failed"""
+        """-> (action, detail). action: rolled-only | published | wait | published-now | already | empty | blocked | failed | expired"""
         now = self.now()
-        state, rolled = roll(load_state(self.state_path), now.date(), self.rng)
+        old = load_state(self.state_path)
+        state, rolled = roll(old, now.date(), self.rng)
         if rolled:
             save_state(self.state_path, state)
             self.say("new day %s: slot drawn %s KST (prev %s %s)" % (now.date(), state["time"], state["prev_date"], state["prev_time"]))
+            if old and old.get("date") and old["date"] < now.date().isoformat() and not old.get("published"):
+                self.say("previous day %s was never published" % old["date"])
+                self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % old["date"], token=old["date"])
             self.warn_stock()
         if roll_only:
             return "rolled-only", state["time"]
         action, why = decide(now, state)
-        if action in ("published", "wait", "expired"):
+        if action in ("published", "wait"):
             self.say("%s: %s" % (action, why))
+            return action, why
+        if action == "expired":
+            self.say("expired: %s" % why)
+            self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % state["date"], token=state["date"])
             return action, why
         if (self.base / "FAILED").exists():
             self.say("FAILED file present — waiting for a human (%s)" % (self.base / "FAILED"))
-            if not self.kw.get("dry_run"):
-                notify("블러쉬랩 발행 멈춤", "FAILED 파일이 있어 발행을 멈췄습니다. 로그를 확인하세요.")
+            self.alert("FAILED", "블러쉬랩 발행 멈춤", "FAILED 파일이 있어 발행을 멈췄습니다. 로그를 확인하세요.")
             return "blocked", "FAILED"
         self.say("due: " + why)
         self.warn_stock()
@@ -333,12 +406,16 @@ class Gate:
             self.say("HARD FAIL: %s" % e)
             self.base.mkdir(parents=True, exist_ok=True)
             (self.base / "FAILED").write_text("%s\n%s\n" % (now.isoformat(), e), encoding="utf-8")
-            if not self.kw.get("dry_run"):
-                notify("블러쉬랩 발행 실패", str(e)[:150])
+            self.alert("FAILED", "블러쉬랩 발행 실패", str(e)[:150])
             return "failed", str(e)
         except SoftFail as e:
             self.say("soft fail: %s (retry next tick)" % e)
             return "failed", str(e)
+        except Exception as e:  # unexpected: log the traceback, restore, and retry next tick (never a crash under launchd)
+            self.say("unexpected %s: %s — restoring, retry next tick\n%s" % (type(e).__name__, e, traceback.format_exc()[-1500:]))
+            if self.kw.get("allow_reset") and not self.kw.get("dry_run"):
+                restore(self.repo)
+            return "failed", "%s: %s" % (type(e).__name__, e)
         if status in ("published", "already"):
             if not self.kw.get("dry_run"):
                 state["published"] = True
@@ -346,9 +423,6 @@ class Gate:
             self.say("%s: %s — slot.json published=true" % (status, slug))
             self.warn_stock()
             return ("published-now" if status == "published" else "already"), slug
-        if status == "waiting":
-            self.say("queue has no complete entry (12 languages) while a slot was due — nothing published")
-            return "waiting", None
         self.say("queue empty while a slot was due — nothing published")
         return "empty", None
 
@@ -392,8 +466,10 @@ def status(gate, state_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--repo", default=None, help="publish clone (default: the dedicated clone; any other path needs this flag)")
-    ap.add_argument("--base", default=os.environ.get("BLUSHLAB_PUBLISH_BASE", str(DEFAULT_BASE)), help="state dir: slot.json, FAILED, STOCK_ALERT")
+    ap.add_argument("--repo", default=None, help="publish clone (default: the dedicated clone; any other path is for tests)")
+    ap.add_argument("--allow-reset", action="store_true",
+                    help="let a publish run reset/clean a clone that is not the dedicated one (the dedicated clone always may)")
+    ap.add_argument("--base", default=os.environ.get("BLUSHLAB_PUBLISH_BASE", str(DEFAULT_BASE)), help="state dir: slot.json, FAILED, alerts.json, STOCK_ALERT")
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--now", help="ISO time with offset (test knob), e.g. 2026-11-20T13:00:00+09:00")
     ap.add_argument("--dry-run", action="store_true", help="plan only: no file, git or state change")
@@ -403,15 +479,20 @@ def main(argv=None):
     state_path = Path(a.base) / "slot.json"
     explicit = bool(a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO"))
     repo = a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO") or str(DEDICATED_REPO)
+    allow_reset = a.allow_reset or Path(repo).resolve() == DEDICATED_REPO.resolve()
     if not a.status:
         refusal = guard_repo(repo, explicit)
         if refusal:
             print(refusal, file=sys.stderr)
             return 2
     now_fn = (lambda: dt.datetime.fromisoformat(a.now)) if a.now else None
-    gate = Gate(state_path, repo, a.base, now_fn=now_fn, remote=a.remote, dry_run=a.dry_run)
+    gate = Gate(state_path, repo, a.base, now_fn=now_fn, remote=a.remote, dry_run=a.dry_run, allow_reset=allow_reset)
     if a.status:
         return status(gate, state_path)
+    if not Path(repo).is_dir():
+        gate.say("전용 클론 없음: %s — 발행하지 않습니다 (클론을 다시 만든 뒤 실행하세요)" % repo)
+        gate.alert("NOCLONE", "블러쉬랩 발행 멈춤", "전용 클론이 없습니다: %s" % repo)
+        return 1
     if a.dry_run:  # a dry run must not touch the real slot.json
         gate.state_path = Path(a.base) / "slot.dryrun.json"
         save_state(gate.state_path, load_state(state_path) or {"date": "1970-01-01", "time": "12:00"})

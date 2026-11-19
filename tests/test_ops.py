@@ -1,5 +1,7 @@
-"""ops/slot_gate.py: slot draw, one post a day, queue stays out of the build, datePublished carries the time."""
+"""ops/slot_gate.py: slot draw, one post a day, queue order, git safety, alerts; queue stays out of the build; datePublished carries the time."""
+import contextlib
 import datetime as dt
+import io
 import random
 import shutil
 import subprocess
@@ -7,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import REPO, build, jsonld, make_site  # noqa: E402
@@ -15,6 +18,10 @@ sys.path.insert(0, str(REPO / "ops"))
 import slot_gate as sg  # noqa: E402
 
 D = dt.date
+
+# every test records macOS notices here instead of calling osascript
+NOTES = []
+sg.notify = lambda title, msg: NOTES.append((title, msg))
 
 
 def fake_repo(n_queue=3):
@@ -67,6 +74,20 @@ class SlotDrawTest(unittest.TestCase):
         self.assertEqual(w, dt.datetime(2026, 11, 20, 14, 30, tzinfo=kst))
         w, _ = sg.next_slot(now, {"date": "2026-11-20", "time": "14:30", "published": True})
         self.assertEqual(w.date(), D(2026, 11, 21))
+
+    def test_window_end_is_judged_to_the_minute(self):
+        """item 1: 18:45:30 is still the 18:45 slot; seconds never close the window early."""
+        kst = sg.KST
+        st = {"date": "2026-11-20", "time": "18:45", "published": False}
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 18, 45, 0, tzinfo=kst), st)[0], "due")
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 18, 45, 30, tzinfo=kst), st)[0], "due")
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 18, 45, 59, tzinfo=kst), st)[0], "due")
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 18, 46, 0, tzinfo=kst), st)[0], "expired")
+        w, which = sg.next_slot(dt.datetime(2026, 11, 20, 18, 45, 30, tzinfo=kst), st)
+        self.assertEqual((w, which), (dt.datetime(2026, 11, 20, 18, 45, tzinfo=kst), "today"))
+        st2 = {"date": "2026-11-20", "time": "13:15", "published": False}
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 13, 14, 59, tzinfo=kst), st2)[0], "wait")
+        self.assertEqual(sg.decide(dt.datetime(2026, 11, 20, 13, 15, 30, tzinfo=kst), st2)[0], "due")
 
 
 class OnePostADayTest(unittest.TestCase):
@@ -125,8 +146,21 @@ class OnePostADayTest(unittest.TestCase):
         next((repo / "content" / "queue").iterdir()).joinpath("tr.md").unlink()
         g, _ = self.gate(repo, base, 18, 45)
         g.tick(roll_only=True)
-        self.assertEqual(g.tick()[0], "waiting")
+        self.assertEqual(g.tick()[0], "failed")  # item 7: SoftFail, retried next tick
         self.assertEqual(list((repo / "content" / "journal").iterdir()), [])
+        self.assertFalse((base / "FAILED").exists())
+
+    def test_incomplete_head_is_not_skipped(self):
+        """item 7: an incomplete head blocks the queue; the complete entry behind it is not published out of order."""
+        repo, base = fake_repo(2), Path(tempfile.mkdtemp())
+        first = sorted((repo / "content" / "queue").iterdir())[0]
+        first.joinpath("tr.md").unlink()
+        g, _ = self.gate(repo, base, 18, 45)
+        g.tick(roll_only=True)
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertEqual(list((repo / "content" / "journal").iterdir()), [])
+        self.assertEqual(len(sg.queue_items(repo)), 2)
+        self.assertFalse(sg.load_state(base / "slot.json")["published"])
 
     def test_stamp_refuses_double_publish(self):
         with self.assertRaises(ValueError):
@@ -186,7 +220,9 @@ class SlotWindowTest(unittest.TestCase):
         w, _ = sg.next_slot(dt.datetime(2026, 11, 20, 19, 0, tzinfo=kst), st)
         self.assertEqual(w.date(), D(2026, 11, 21))
 
-    def test_expired_tick_publishes_nothing(self):
+    def test_expired_tick_publishes_nothing_and_alerts_once(self):
+        """item 4: a missed window notifies once for that day, not on every later tick."""
+        NOTES.clear()
         repo, base = fake_repo(3), Path(tempfile.mkdtemp())
         calls = []
         g = sg.Gate(base / "slot.json", repo, base, publish_fn=lambda *a, **k: calls.append(a) or ("published", "x"),
@@ -195,7 +231,22 @@ class SlotWindowTest(unittest.TestCase):
         sg.save_state(base / "slot.json", {"date": "2026-11-20", "time": "12:00", "published": False})
         g.now_fn = lambda: dt.datetime(2026, 11, 20, 19, 10, tzinfo=sg.KST)
         self.assertEqual(g.tick()[0], "expired")
+        self.assertEqual(g.tick()[0], "expired")
         self.assertEqual(calls, [])
+        self.assertEqual(len([n for n in NOTES if "놓침" in n[0]]), 1)
+
+    def test_rollover_alerts_missed_previous_day_once(self):
+        """item 4: the day after an unpublished day is reported at that day's rollover tick (launchd's last tick is 18:45)."""
+        NOTES.clear()
+        repo, base = fake_repo(3), Path(tempfile.mkdtemp())
+        sg.save_state(base / "slot.json", {"date": "2026-11-19", "time": "13:00", "published": False})
+        g = sg.Gate(base / "slot.json", repo, base, rng=random.Random(7), log=lambda m: None,
+                    now_fn=lambda: dt.datetime(2026, 11, 20, 12, 0, tzinfo=sg.KST))
+        self.assertEqual(g.tick()[0], "wait")
+        self.assertEqual(g.tick()[0], "wait")
+        missed = [n for n in NOTES if "놓침" in n[0]]
+        self.assertEqual(len(missed), 1)
+        self.assertIn("2026-11-19", missed[0][1])
 
 
 class RepoGuardTest(unittest.TestCase):
@@ -217,10 +268,8 @@ class GitPublishTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
         self.flags = self.tmp / "flags"
         self.flags.mkdir()
-        self.notes = []
-        old = sg.notify
-        sg.notify = lambda title, msg: self.notes.append((title, msg))
-        self.addCleanup(lambda: setattr(sg, "notify", old))
+        NOTES.clear()
+        self.notes = NOTES
         self.origin = self.tmp / "origin.git"
         self.work = self.tmp / "work"
         self.base = self.tmp / "base"
@@ -259,16 +308,27 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(len(sg.queue_items(self.work)), 3)  # the queue entry is back
         self.assertEqual(sorted(p.name for p in (self.work / "content" / "journal").iterdir()), [".gitkeep"])
 
-    def gate(self, hour, minute=0):
+    def gate(self, hour, minute=0, **kw):
         return sg.Gate(self.base / "slot.json", self.work, self.base, remote="origin", rng=random.Random(3),
-                       log=lambda m: None, now_fn=lambda: dt.datetime(2026, 11, 20, hour, minute, tzinfo=sg.KST))
+                       log=lambda m: None, now_fn=lambda: dt.datetime(2026, 11, 20, hour, minute, tzinfo=sg.KST),
+                       allow_reset=True, **kw)
 
     def test_commit_failure_restores_and_is_hard_fail(self):
         self.flag("commit_fail")
         with self.assertRaises(sg.HardFail):
-            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
         self.assert_restored()
         self.assertEqual(_git(self.work, "log", "--oneline", "-1").split(" ", 1)[1].strip(), "init")
+
+    def test_commit_failure_without_allow_reset_leaves_files(self):
+        """the clone is restored only when reset is allowed; otherwise the leftovers stay for a human to see."""
+        self.flag("commit_fail")
+        with self.assertRaises(sg.HardFail):
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=False)
+        self.assertNotEqual(self.status(), "")
+        (self.flags / "commit_fail").unlink()
+        _git(self.work, "reset", "-q", "--hard", "HEAD")
+        _git(self.work, "clean", "-fdq")
 
     def test_push_failure_is_hard_fail_with_failed_file_and_notice(self):
         self.flag("reject_push")
@@ -284,11 +344,48 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(g.tick()[0], "blocked")
         self.assertEqual(len(self.notes), 2)
 
+    def test_failed_notice_is_once_per_day(self):
+        """item 6: the same day's later ticks do not notify again."""
+        self.flag("reject_push")
+        g = self.gate(18, 45)
+        g.tick()
+        self.assertEqual(g.tick()[0], "blocked")
+        self.assertEqual(g.tick()[0], "blocked")
+        self.assertEqual(len(self.notes), 1)
+
+    def test_failed_removal_does_not_unblock(self):
+        """item 2: removing FAILED while the local commit is still not on origin/main stops again at the same check."""
+        self.flag("reject_push")
+        first_slug = sg.queue_items(self.work)[0][1]
+        g = self.gate(18, 45)
+        self.assertEqual(g.tick()[0], "failed")
+        sha = _git(self.work, "rev-parse", "--short", "HEAD").strip()
+        (self.base / "FAILED").unlink()
+        (self.base / "slot.json").unlink()  # same day, re-drawn: still due
+        g.now_fn = lambda: dt.datetime(2026, 11, 20, 18, 45, tzinfo=sg.KST)
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertTrue((self.base / "FAILED").is_file())
+        self.assertIn(sha, (self.base / "FAILED").read_text(encoding="utf-8"))
+        self.assertEqual(len(sg.queue_items(self.work)), 2)  # only the first run's head was taken (it sits in the local commit); no second post
+        self.assertEqual(sorted(p.name for p in (self.work / "content" / "journal").iterdir()), sorted([".gitkeep", first_slug]))
+
+    def test_local_only_commit_blocks_publishing(self):
+        """item 2: a local commit origin/main does not have stops publishing before anything is written."""
+        dest = self.work / "content" / "journal" / "local-only"
+        dest.mkdir()
+        (dest / "en.md").write_text("---\ntitle: x\npublished: 2026-11-20T10:00+09:00\n---\nbody\n", encoding="utf-8")
+        _git(self.work, "add", "-A")
+        _git(self.work, "commit", "-q", "-m", "local draft")
+        with self.assertRaises(sg.HardFail) as cm:
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
+        self.assertIn("local commit", str(cm.exception))
+        self.assertEqual(len(sg.queue_items(self.work)), 3)
+
     def test_build_and_check_failure_restore_then_soft_fail(self):
         for name in ("build_fail", "check_fail"):
             self.flag(name)
             with self.assertRaises(sg.SoftFail):
-                sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")
+                sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
             self.assert_restored()
             (self.flags / name).unlink()
         g = self.gate(18, 45)
@@ -297,6 +394,69 @@ class GitPublishTest(unittest.TestCase):
         self.assertFalse((self.base / "FAILED").exists())  # retry on the next tick, no human needed
         self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
         self.assertEqual(self.notes, [])
+
+    def test_pull_failure_restores_and_is_soft_fail(self):
+        """item 5: the pull is inside the restore step; a failed pull aborts the rebase and retries next tick."""
+        real = sg.run
+
+        def boom(cmd, cwd, what):
+            if cmd[:2] == ["git", "pull"]:
+                raise sg.SoftFail("git pull --rebase failed (1): boom")
+            return real(cmd, cwd, what)
+
+        with mock.patch.object(sg, "run", side_effect=boom):
+            with self.assertRaises(sg.SoftFail):
+                sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
+        self.assert_restored()
+        self.assertFalse((self.work / ".git" / "rebase-merge").exists())
+        self.assertFalse((self.work / ".git" / "rebase-apply").exists())
+
+    def test_pull_moves_queue_head(self):
+        """item 5: the queue is read again after the pull, so a head removed upstream is not published."""
+        items = sg.queue_items(self.work)
+        first, second = items[0], items[1]
+        other = self.tmp / "other"
+        _git(self.tmp, "clone", "-q", str(self.origin), str(other))
+        _git(other, "config", "user.name", "test")
+        _git(other, "config", "user.email", "test@example.invalid")
+        shutil.rmtree(str(other / "content" / "queue" / first[0].name))
+        _git(other, "add", "-A")
+        _git(other, "commit", "-q", "-m", "drop head")
+        _git(other, "push", "-q", "origin", "main")
+        status, slug = sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
+        self.assertEqual((status, slug), ("published", second[1]))
+        self.assertTrue((self.work / "content" / "journal" / second[1]).is_dir())
+        self.assertFalse((self.work / "content" / "journal" / first[1]).exists())
+
+    def test_unexpected_exception_is_logged_restored_and_retried(self):
+        """item 3: an unexpected error logs its traceback, restores the clone, and is a SoftFail (no FAILED file)."""
+        logs = []
+
+        def bad(repo, day, hm, **kw):
+            (Path(repo) / "content" / "journal" / "junk.txt").write_text("x")
+            raise RuntimeError("kaboom")
+
+        g = sg.Gate(self.base / "slot.json", self.work, self.base, publish_fn=bad, remote="origin", allow_reset=True,
+                    rng=random.Random(3), log=logs.append,
+                    now_fn=lambda: dt.datetime(2026, 11, 20, 18, 45, tzinfo=sg.KST))
+        self.assertEqual(g.tick()[0], "failed")
+        joined = "\n".join(logs)
+        self.assertIn("unexpected RuntimeError: kaboom", joined)
+        self.assertIn("Traceback", joined)
+        self.assert_restored()
+        self.assertFalse((self.base / "FAILED").exists())
+        self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
+
+    def test_missing_clone_logs_notifies_and_exits_without_crash(self):
+        """item 3: a missing dedicated clone is logged and notified; main returns 1 instead of raising."""
+        NOTES.clear()
+        gone = self.tmp / "no-clone"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = sg.main(["--repo", str(gone), "--base", str(self.base), "--now", "2026-11-20T18:45:00+09:00"])
+        self.assertEqual(rc, 1)
+        self.assertIn("전용 클론 없음", buf.getvalue())
+        self.assertTrue(any("전용 클론이 없습니다" in m for _, m in NOTES))
 
     def test_already_is_judged_on_origin_main(self):
         self.assertEqual(sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")[0], "published")
@@ -308,16 +468,6 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(self.status(), "")  # nothing written, nothing staged
         self.assertEqual(sorted(p.name for p in (self.work / "content" / "journal").iterdir()), [".gitkeep"])
         self.assertEqual(len(sg.queue_items(self.work)), 3)  # this clone's queue untouched
-
-    def test_local_only_post_dated_today_does_not_count(self):
-        dest = self.work / "content" / "journal" / "local-only"
-        dest.mkdir()
-        (dest / "en.md").write_text("---\ntitle: x\npublished: 2026-11-20T10:00+09:00\n---\nbody\n", encoding="utf-8")
-        _git(self.work, "add", "-A")
-        _git(self.work, "commit", "-q", "-m", "local draft")
-        status, slug = sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")
-        self.assertEqual(status, "published")
-        self.assertEqual(slug, "two-modes-one-game")
 
 
 if __name__ == "__main__":
