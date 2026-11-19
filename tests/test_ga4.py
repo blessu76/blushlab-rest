@@ -57,6 +57,15 @@ class Ga4(unittest.TestCase):
             with self.subTest(lang):
                 self.assertIn("updated: " + bs.EFFECTIVE, src)
 
+    def test_snippet_skips_local_preview_hosts(self):
+        # the guard must come before the gtag script is added, so localhost / 127.0.0.1 never send a hit
+        for rel, text in self.pages.items():
+            with self.subTest(rel):
+                guard = text.index("location.hostname")
+                self.assertLess(guard, text.index("googletagmanager.com/gtag/js"))
+                self.assertIn("'127.0.0.1'", text[guard:guard + 120])
+                self.assertIn("'localhost'", text[guard:guard + 120])
+
     def test_terms_keep_their_own_effective_date(self):
         for lang in LANGS:
             self.assertIn(bs.TERMS_EFFECTIVE, self.page(lang, "terms/"))

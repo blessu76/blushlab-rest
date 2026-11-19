@@ -154,6 +154,21 @@ class SiteFiles(unittest.TestCase):
         for d in (REPO / "content" / "journal").iterdir():
             self.assertIn("/journal/%s/" % d.name, t)
 
+    def test_support_faq_is_marked_up_as_faqpage(self):
+        # every language's support page with a FAQ section carries FAQPage with the same questions as the visible headings
+        for lang in bs.LANGS:
+            path = REPO / ("" if lang == "en" else lang) / "support" / "index.html"
+            if not path.exists():
+                continue
+            with self.subTest(lang):
+                faq = next((x for x in graph_of(path) if x["@type"] == "FAQPage"), None)
+                self.assertIsNotNone(faq, path)
+                self.assertGreaterEqual(len(faq["mainEntity"]), 2)
+                html = path.read_text(encoding="utf-8")
+                for q in faq["mainEntity"]:
+                    self.assertIn(q["name"], html)
+                    self.assertTrue(q["acceptedAnswer"]["text"])
+
     def test_robots_does_not_block_ai_crawlers(self):
         t = (REPO / "robots.txt").read_text(encoding="utf-8")
         self.assertNotRegex(t, r"(?im)^\s*Disallow:\s*/\s*$")
