@@ -14,7 +14,9 @@ Each tick:
   1. slot.json date is not today -> draw a new time (hour != yesterday's); yesterday's date/time move to prev_*.
      A previous day that was never published -> one MISSED notice.
   2. published already true -> nothing.   now < time -> wait.
-     now after the window end (18:45, judged to the minute: 18:45:30 is still inside) -> expired, MISSED notice once.
+     now after the window end (18:45, judged to the minute: 18:45:30 is still inside) -> expired: origin/main is checked
+     (at most once per 15 min, origin_check.json). A post dated today there -> published = true. An unreachable origin ->
+     no notice, slot.json untouched, checked again on a later tick. Otherwise MISSED notice once.
   3. otherwise publish the FIRST queue post (content/queue/NN-slug/, all 12 languages). The head is never skipped: an
      incomplete head is a SoftFail (retry next tick). It is moved to content/journal/<slug>/ with `published:` = today +
      the slot time, then build_site.py -> scripts/check.sh -> git commit -> git push origin main.
@@ -24,6 +26,8 @@ Each tick:
      through). The pull is part of the restored step: a pull failure aborts the rebase and retries next tick.
      A failed check/build/pull restores the working tree (when reset is allowed) and retries next tick.
      Any unexpected exception is logged with its traceback, restored the same way, and retried next tick.
+     A dirty tree at the start is restored only in the dedicated clone; any other clone is left alone (SoftFail).
+     A restore whose git step fails is a SoftFail (the error is logged; a failed restore after a commit failure is a HardFail).
      A failed commit restores the tree and is a HardFail (FAILED). A failed push keeps the local commit, writes its hash to
      FAILED, and is a HardFail: a human pushes or drops that commit, then removes FAILED.
      "Already published today" is judged on origin/main after `git fetch`.
@@ -59,6 +63,7 @@ HOME = Path.home() / ".ipe"
 DEFAULT_BASE = HOME / "blushlab-publish"
 DEDICATED_REPO = DEFAULT_BASE / "repo"  # the default publishing clone
 QUEUE_RE = re.compile(r"^(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
+ORIGIN_CHECK_EVERY = dt.timedelta(minutes=15)  # the expired-window origin check fetches at most this often (per day)
 
 
 class SoftFail(Exception):
@@ -250,9 +255,14 @@ def origin_post_dated(repo, day, remote="origin", branch="main"):
     return None
 
 
+def is_dedicated(repo):
+    """True only for the dedicated publishing clone (checked at call time, so tests can point DEDICATED_REPO elsewhere)."""
+    return Path(repo).resolve() == DEDICATED_REPO.resolve()
+
+
 def guard_repo(repo, explicit):
     """None when a publishing run may use `repo`, else the refusal text. The default is the dedicated clone; another path needs --repo (tests)."""
-    if explicit or Path(repo).resolve() == DEDICATED_REPO.resolve():
+    if explicit or is_dedicated(repo):
         return None
     return "refusing to publish from %s — only the dedicated clone %s may run this (test runs: pass --repo)" % (repo, DEDICATED_REPO)
 
@@ -268,21 +278,23 @@ def notify(title, msg):
 
 
 def restore(repo):
-    """back to HEAD: unstage, drop edits and the new journal files. Only when reset is allowed (see publish_one / --allow-reset)."""
-    subprocess.run(["git", "reset", "-q", "--hard", "HEAD"], cwd=str(repo), capture_output=True)
-    subprocess.run(["git", "clean", "-fdq"], cwd=str(repo), capture_output=True)
+    """back to HEAD: unstage, drop edits and the new journal files. Only when reset is allowed (see publish_one).
+    A git step that fails is a SoftFail, never silently ignored."""
+    run(["git", "reset", "-q", "--hard", "HEAD"], repo, "restore: git reset")
+    run(["git", "clean", "-fdq"], repo, "restore: git clean")
 
 
 def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True, allow_reset=False, log=print):
     """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | already
-    A dirty tree (an interrupted run) is restored first when allow_reset is set, otherwise it is a SoftFail.
+    A dirty tree (an interrupted run) is restored first only when allow_reset is set AND repo is the dedicated clone;
+    any other dirty tree is a SoftFail and is left as it is.
     A failure after the first file change restores the clone when allow_reset is set. A commit or push failure is HardFail
     (a human looks); a push failure keeps the local commit, which then blocks every later run until it is resolved."""
     repo = Path(repo)
     if pull and not dry_run:
         if run(["git", "status", "--porcelain"], repo, "git status").strip():
-            if not allow_reset:
-                raise SoftFail("working tree is dirty — refusing to publish")
+            if not (allow_reset and is_dedicated(repo)):
+                raise SoftFail("working tree of %s is dirty — refusing to publish (left as it is: only the dedicated clone is restored)" % repo)
             log("working tree of %s is dirty (left by an interrupted run) — restored to HEAD, then publishing" % repo)
             restore(repo)
         fetch(repo, remote)
@@ -320,9 +332,14 @@ def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pu
         run(["git", "add", "-A"], repo, "git add")
         run(["git", "commit", "-m", "journal: %s (%s)" % (slug, iso)], repo, "git commit")
     except SoftFail as e:
+        cause = "commit failed: %s" % e
         if allow_reset:
-            restore(repo)  # nothing staged, nothing half-written
-        raise HardFail("commit failed%s: %s" % (", clone restored" if allow_reset else "", e))
+            try:
+                restore(repo)  # nothing staged, nothing half-written
+            except SoftFail as r:
+                raise HardFail("%s; restore failed too, the clone needs a human: %s" % (cause, r))
+            cause += " (clone restored)"
+        raise HardFail(cause)
     sha = run(["git", "rev-parse", "--short", "HEAD"], repo, "git rev-parse").strip()
     try:
         run(["git", "push", remote, branch], repo, "git push")
@@ -368,17 +385,42 @@ class Gate:
             pass
 
     def todays_post_on_origin(self, day):
-        """slug of a post dated `day` on origin/main, else None. A dry run reads this clone only; an unreachable origin is None."""
+        """slug of a post dated `day` on origin/main, else None. A dry run reads this clone only. An unreachable origin raises SoftFail."""
         d = dt.date.fromisoformat(day)
+        if self.kw.get("dry_run"):
+            return post_dated(self.repo, d)
+        remote = self.kw.get("remote", "origin")
+        fetch(self.repo, remote)
+        return origin_post_dated(self.repo, d, remote)
+
+    def origin_check(self, day):
+        """-> (result, detail) for a post dated `day` on origin/main: ("post", slug) | ("none", None) | ("error", reason).
+        Fetches at most once per ORIGIN_CHECK_EVERY: origin_check.json keeps the last result, errors included, so an
+        expired window does not fetch on every tick. A dry run writes nothing."""
+        path = self.base / "origin_check.json"
+        now = self.now()
         try:
-            if self.kw.get("dry_run"):
-                return post_dated(self.repo, d)
-            remote = self.kw.get("remote", "origin")
-            fetch(self.repo, remote)
-            return origin_post_dated(self.repo, d, remote)
+            cached = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (ValueError, OSError):
+            cached = {}
+        if not isinstance(cached, dict):
+            cached = {}
+        if cached.get("date") == day and cached.get("result") and cached.get("at"):
+            try:
+                if now - dt.datetime.fromisoformat(cached["at"]) < ORIGIN_CHECK_EVERY:
+                    return cached["result"], cached.get("detail")
+            except (TypeError, ValueError):
+                pass
+        try:
+            slug = self.todays_post_on_origin(day)
+            res = ("post", slug) if slug else ("none", None)
         except SoftFail as e:
-            self.say("could not check origin for %s: %s" % (day, e))
-            return None
+            res = ("error", str(e))
+        if not self.kw.get("dry_run"):
+            self.base.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"date": day, "at": now.isoformat(), "result": res[0], "detail": res[1]},
+                                       ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return res
 
     def warn_stock(self):
         n = len(ready_items(self.repo))
@@ -394,7 +436,7 @@ class Gate:
         return n
 
     def tick(self, roll_only=False):
-        """-> (action, detail). action: rolled-only | published | wait | published-now | already | empty | blocked | failed | expired"""
+        """-> (action, detail). action: rolled-only | published | wait | published-now | already | empty | blocked | failed | expired | expired-unknown"""
         now = self.now()
         old = load_state(self.state_path)
         state, rolled = roll(old, now.date(), self.rng)
@@ -413,13 +455,17 @@ class Gate:
             return action, why
         if action == "expired":
             # RunAtLoad can start a tick after the window closed: a post already on origin/main is today's, not a miss
-            done = self.todays_post_on_origin(state["date"])
-            if done:
+            result, detail = self.origin_check(state["date"])
+            if result == "post":
                 state["published"] = True
                 if not self.kw.get("dry_run"):
                     save_state(self.state_path, state)
-                self.say("already: %s is on origin/main (window closed before this tick) — slot.json published=true" % done)
-                return "already", done
+                self.say("already: %s is on origin/main (window closed before this tick) — slot.json published=true" % detail)
+                return "already", detail
+            if result == "error":
+                # origin unknown: no notice and no state change; a later tick checks again
+                self.say("expired, origin unreachable (%s) — no notice, checked again on a later tick" % detail)
+                return "expired-unknown", why
             self.say("expired: %s" % why)
             self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % state["date"], token=state["date"])
             return action, why
@@ -447,7 +493,10 @@ class Gate:
         except Exception as e:  # unexpected: log the traceback, restore, and retry next tick (never a crash under launchd)
             self.say("unexpected %s: %s — restoring, retry next tick\n%s" % (type(e).__name__, e, traceback.format_exc()[-1500:]))
             if self.kw.get("allow_reset") and not self.kw.get("dry_run"):
-                restore(self.repo)
+                try:
+                    restore(self.repo)
+                except SoftFail as r:
+                    self.say("restore failed: %s" % r)
             return "failed", "%s: %s" % (type(e).__name__, e)
         if status in ("published", "already"):
             if not self.kw.get("dry_run"):
@@ -512,7 +561,10 @@ def main(argv=None):
     state_path = Path(a.base) / "slot.json"
     explicit = bool(a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO"))
     repo = a.repo or os.environ.get("BLUSHLAB_PUBLISH_REPO") or str(DEDICATED_REPO)
-    allow_reset = a.allow_reset or Path(repo).resolve() == DEDICATED_REPO.resolve()
+    # only the dedicated clone may be reset/cleaned; --allow-reset is ignored for any other clone (a human's work stays)
+    allow_reset = is_dedicated(repo)
+    if a.allow_reset and not allow_reset:
+        print("--allow-reset ignored: %s is not the dedicated clone, it is never reset" % repo, file=sys.stderr)
     if not a.status:
         refusal = guard_repo(repo, explicit)
         if refusal:

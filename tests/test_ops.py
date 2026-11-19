@@ -230,8 +230,10 @@ class SlotWindowTest(unittest.TestCase):
         g.tick(roll_only=True)
         sg.save_state(base / "slot.json", {"date": "2026-11-20", "time": "12:00", "published": False})
         g.now_fn = lambda: dt.datetime(2026, 11, 20, 19, 10, tzinfo=sg.KST)
-        self.assertEqual(g.tick()[0], "expired")
-        self.assertEqual(g.tick()[0], "expired")
+        # fake repo is not a git clone: origin is reachable (no-op fetch) and has no post today
+        with mock.patch.object(sg, "fetch", lambda *a, **k: None), mock.patch.object(sg, "origin_post_dated", lambda *a, **k: None):
+            self.assertEqual(g.tick()[0], "expired")
+            self.assertEqual(g.tick()[0], "expired")
         self.assertEqual(calls, [])
         self.assertEqual(len([n for n in NOTES if "놓침" in n[0]]), 1)
 
@@ -471,10 +473,11 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(len(sg.queue_items(self.work)), 3)  # this clone's queue untouched
 
     def test_dirty_clone_is_restored_then_published_when_reset_allowed(self):
-        """review 1: a tree left dirty by an interrupted run is restored (allow_reset) and the run goes on; the restore is logged."""
+        """review 1: a tree left dirty by an interrupted run is restored (allow_reset, dedicated clone only) and the run goes on; the restore is logged."""
         (self.work / "stray.txt").write_text("left over")
         logs = []
-        status, slug = sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
+        with mock.patch.object(sg, "DEDICATED_REPO", self.work):
+            status, slug = sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
         self.assertEqual(status, "published")
         self.assertTrue(any("dirty" in m and "restored" in m for m in logs))
         self.assertFalse((self.work / "stray.txt").exists())
@@ -486,6 +489,54 @@ class GitPublishTest(unittest.TestCase):
             sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=False)
         self.assertTrue((self.work / "stray.txt").exists())
         self.assertEqual(len(sg.queue_items(self.work)), 3)
+
+    def test_dirty_non_dedicated_clone_with_allow_reset_is_soft_fail_and_untouched(self):
+        """W1: a human's clone (not the dedicated one) is never reset, even with allow_reset: the file stays, SoftFail."""
+        (self.work / "stray.txt").write_text("left over")
+        logs = []
+        with self.assertRaises(sg.SoftFail):
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
+        self.assertEqual((self.work / "stray.txt").read_text(), "left over")
+        self.assertEqual(len(sg.queue_items(self.work)), 3)
+        self.assertEqual(sorted(p.name for p in (self.work / "content" / "journal").iterdir()), [".gitkeep"])
+        self.assertFalse(any("restored" in m for m in logs))
+
+    def test_restore_git_failure_is_soft_fail(self):
+        """W1: restore() checks git's return code; a failing reset is a SoftFail, not a silent success."""
+        (self.work / ".git" / "index.lock").write_text("")  # makes git reset fail (128)
+        try:
+            with self.assertRaises(sg.SoftFail):
+                sg.restore(self.work)
+        finally:
+            (self.work / ".git" / "index.lock").unlink()
+
+    def test_dedicated_dirty_restore_failure_is_soft_fail_not_published(self):
+        """W1: in the dedicated clone a dirty tree whose restore fails stops the run as SoftFail before anything is published."""
+        (self.work / "stray.txt").write_text("left over")
+        (self.work / ".git" / "index.lock").write_text("")
+        try:
+            with mock.patch.object(sg, "DEDICATED_REPO", self.work):
+                with self.assertRaises(sg.SoftFail):
+                    sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True)
+        finally:
+            (self.work / ".git" / "index.lock").unlink()
+        self.assertTrue((self.work / "stray.txt").exists())
+        self.assertEqual(len(sg.queue_items(self.work)), 3)
+
+    def test_main_explicit_repo_passes_allow_reset_false(self):
+        """W1 (the opposite case): --repo to a non-dedicated clone, even with --allow-reset, reaches publish with allow_reset=False."""
+        seen = []
+
+        def fake(repo, day, hm, **kw):
+            seen.append(kw)
+            return "empty", None
+
+        with mock.patch.object(sg, "publish_one", fake), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = sg.main(["--repo", str(self.work), "--allow-reset", "--base", str(self.base), "--now", "2026-11-20T18:45:00+09:00"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(seen), 1)
+        self.assertIs(seen[0]["allow_reset"], False)
 
     def test_last_tick_soft_fail_notifies_missed_once(self):
         """review 2: launchd's 18:45:00 tick is due, not expired; a SoftFail there reports today's miss, once per day."""
@@ -517,15 +568,56 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(len(sg.queue_items(self.work)), 3)  # head kept, nothing skipped
 
     def test_window_closed_but_today_on_origin_records_already(self):
-        """review 5: RunAtLoad after the window closed: today's post already on origin/main -> published=true, no miss notice."""
-        self.assertEqual(sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")[0], "published")
-        _git(self.work, "reset", "-q", "--hard", "HEAD~1")  # this clone is behind origin/main
+        """review 5 / W4: RunAtLoad after the window closed: today's post already on origin/main -> published=true, no miss notice.
+        The post is pushed from ANOTHER clone, so this clone's origin/main ref is stale until the tick fetches: without the
+        fetch the check would see no post and notify MISSED."""
+        other = self.tmp / "other-post"
+        _git(self.tmp, "clone", "-q", str(self.origin), str(other))
+        _git(other, "config", "user.name", "test")
+        _git(other, "config", "user.email", "test@example.invalid")
+        post = other / "content" / "journal" / "remote-post"
+        post.mkdir(parents=True)
+        (post / "en.md").write_text("---\ntitle: x\npublished: 2026-11-20T13:15+09:00\n---\nbody\n", encoding="utf-8")
+        _git(other, "add", "-A")
+        _git(other, "commit", "-q", "-m", "remote post")
+        _git(other, "push", "-q", "origin", "main")
+        self.assertNotEqual(_git(self.work, "rev-parse", "origin/main").strip(), _git(other, "rev-parse", "HEAD").strip())  # stale on purpose
         sg.save_state(self.base / "slot.json", {"date": "2026-11-20", "time": "13:15", "published": False})
         g = self.gate(19, 10)
-        self.assertEqual(g.tick()[0], "already")
+        self.assertEqual(g.tick(), ("already", "remote-post"))
         self.assertTrue(sg.load_state(self.base / "slot.json")["published"])
         self.assertEqual([t for t, _ in self.notes if t == "블러쉬랩 발행 놓침"], [])
         self.assertEqual(self.status(), "")
+
+    def test_origin_unreachable_is_no_notice_no_state_then_recovers(self):
+        """W2: expired + origin unreachable -> no MISSED, slot.json untouched; origin fetched at most once per 15 min;
+        the next reachable check decides (no post -> MISSED once; the same day's later ticks stay quiet)."""
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-20", "time": "13:15", "published": False})
+        real_fetch, fetched = sg.fetch, []
+
+        def counting(repo, remote="origin"):
+            fetched.append(remote)
+            return real_fetch(repo, remote)
+
+        with mock.patch.object(sg, "fetch", side_effect=counting):
+            g = self.gate(19, 10)
+            g.kw["remote"] = "nope"  # unreachable
+            self.assertEqual(g.tick()[0], "expired-unknown")
+            self.assertEqual(self.notes, [])
+            self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
+            g.now_fn = lambda: dt.datetime(2026, 11, 20, 19, 11, tzinfo=sg.KST)
+            self.assertEqual(g.tick()[0], "expired-unknown")  # inside 15 min: no second fetch
+            self.assertEqual(fetched, ["nope"])
+            g.kw["remote"] = "origin"
+            g.now_fn = lambda: dt.datetime(2026, 11, 20, 19, 25, tzinfo=sg.KST)
+            self.assertEqual(g.tick()[0], "expired")  # origin reachable, no post today -> MISSED
+            self.assertEqual(fetched, ["nope", "origin"])
+            g.now_fn = lambda: dt.datetime(2026, 11, 20, 19, 26, tzinfo=sg.KST)
+            self.assertEqual(g.tick()[0], "expired")  # cached check, no fetch, no second notice
+            self.assertEqual(fetched, ["nope", "origin"])
+        self.assertEqual(len([t for t, _ in self.notes if t == "블러쉬랩 발행 놓침"]), 1)
+        self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
+        self.assertFalse((self.base / "FAILED").exists())
 
     def test_launchd_call_path_gets_allow_reset(self):
         """review 4: launchd runs main() with no flags against the dedicated clone; that path must reach publish with allow_reset=True."""
