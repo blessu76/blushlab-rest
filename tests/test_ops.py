@@ -393,7 +393,8 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(g.tick()[0], "failed")
         self.assertFalse((self.base / "FAILED").exists())  # retry on the next tick, no human needed
         self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
-        self.assertEqual(self.notes, [])
+        # the 18:45:00 tick is the last one: its miss is reported (MISSED), but it is not a FAILED stop
+        self.assertEqual([t for t, _ in self.notes], ["블러쉬랩 발행 놓침"])
 
     def test_pull_failure_restores_and_is_soft_fail(self):
         """item 5: the pull is inside the restore step; a failed pull aborts the rebase and retries next tick."""
@@ -468,6 +469,78 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(self.status(), "")  # nothing written, nothing staged
         self.assertEqual(sorted(p.name for p in (self.work / "content" / "journal").iterdir()), [".gitkeep"])
         self.assertEqual(len(sg.queue_items(self.work)), 3)  # this clone's queue untouched
+
+    def test_dirty_clone_is_restored_then_published_when_reset_allowed(self):
+        """review 1: a tree left dirty by an interrupted run is restored (allow_reset) and the run goes on; the restore is logged."""
+        (self.work / "stray.txt").write_text("left over")
+        logs = []
+        status, slug = sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
+        self.assertEqual(status, "published")
+        self.assertTrue(any("dirty" in m and "restored" in m for m in logs))
+        self.assertFalse((self.work / "stray.txt").exists())
+        self.assertTrue(_git(self.work, "log", "--oneline", "-1").split(" ", 1)[1].startswith("journal: %s" % slug))
+
+    def test_dirty_clone_without_allow_reset_is_soft_fail_and_untouched(self):
+        (self.work / "stray.txt").write_text("left over")
+        with self.assertRaises(sg.SoftFail):
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=False)
+        self.assertTrue((self.work / "stray.txt").exists())
+        self.assertEqual(len(sg.queue_items(self.work)), 3)
+
+    def test_last_tick_soft_fail_notifies_missed_once(self):
+        """review 2: launchd's 18:45:00 tick is due, not expired; a SoftFail there reports today's miss, once per day."""
+        self.flag("check_fail")
+        g = self.gate(18, 45)
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertEqual(g.tick()[0], "failed")  # the same minute again (18:45:30): no second notice
+        missed = [t for t, m in self.notes if t == "블러쉬랩 발행 놓침"]
+        self.assertEqual(len(missed), 1)
+        self.assertIn("2026-11-20", [m for t, m in self.notes if t == "블러쉬랩 발행 놓침"][0])
+
+    def test_soft_fail_before_last_minute_does_not_notify_missed(self):
+        self.flag("check_fail")
+        g = self.gate(18, 44)
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertEqual(self.notes, [])
+
+    def test_incomplete_head_notifies_once_a_day(self):
+        """review 3: an incomplete queue head is a SoftFail with its own once-a-day notice (HEAD_INCOMPLETE), never skipped."""
+        head = sg.queue_items(self.work)[0][0]
+        _git(self.work, "rm", "-q", str(head / "ja.md"))
+        _git(self.work, "commit", "-q", "-m", "drop ja")
+        _git(self.work, "push", "-q", "origin", "main")
+        g = self.gate(18, 45)
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertEqual(g.tick()[0], "failed")
+        self.assertEqual(len([t for t, _ in self.notes if t == "블러쉬랩 큐 미완성"]), 1)
+        self.assertFalse((self.base / "FAILED").exists())
+        self.assertEqual(len(sg.queue_items(self.work)), 3)  # head kept, nothing skipped
+
+    def test_window_closed_but_today_on_origin_records_already(self):
+        """review 5: RunAtLoad after the window closed: today's post already on origin/main -> published=true, no miss notice."""
+        self.assertEqual(sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin")[0], "published")
+        _git(self.work, "reset", "-q", "--hard", "HEAD~1")  # this clone is behind origin/main
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-20", "time": "13:15", "published": False})
+        g = self.gate(19, 10)
+        self.assertEqual(g.tick()[0], "already")
+        self.assertTrue(sg.load_state(self.base / "slot.json")["published"])
+        self.assertEqual([t for t, _ in self.notes if t == "블러쉬랩 발행 놓침"], [])
+        self.assertEqual(self.status(), "")
+
+    def test_launchd_call_path_gets_allow_reset(self):
+        """review 4: launchd runs main() with no flags against the dedicated clone; that path must reach publish with allow_reset=True."""
+        seen = []
+
+        def fake(repo, day, hm, **kw):
+            seen.append(kw)
+            return "empty", None
+
+        with mock.patch.object(sg, "DEDICATED_REPO", self.work), mock.patch.object(sg, "publish_one", fake), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = sg.main(["--base", str(self.base), "--now", "2026-11-20T18:45:00+09:00"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0]["allow_reset"])
 
 
 if __name__ == "__main__":

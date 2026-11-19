@@ -69,6 +69,10 @@ class HardFail(Exception):
     """a human must look (FAILED file)"""
 
 
+class IncompleteHead(SoftFail):
+    """the queue head lacks a language: retry next tick, notify once a day (HEAD_INCOMPLETE)"""
+
+
 # ---------------------------------------------------------------- pure logic (unit-tested)
 
 def hour_of(hm):
@@ -155,7 +159,7 @@ def queue_head(root):
     """(dir, slug) of the first queue entry. The order is never skipped: an incomplete head is a SoftFail. Queue must not be empty."""
     d, slug, miss = queue_items(root)[0]
     if miss:
-        raise SoftFail("queue head %s is incomplete (missing %s) — waiting, order kept" % (d.name, ",".join(miss)))
+        raise IncompleteHead("queue head %s is incomplete (missing %s) — waiting, order kept" % (d.name, ",".join(miss)))
     return d, slug
 
 
@@ -269,14 +273,18 @@ def restore(repo):
     subprocess.run(["git", "clean", "-fdq"], cwd=str(repo), capture_output=True)
 
 
-def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True, allow_reset=False):
+def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pull=True, allow_reset=False, log=print):
     """queue -> journal -> build -> check -> commit -> push. -> (status, slug). status: published | empty | already
+    A dirty tree (an interrupted run) is restored first when allow_reset is set, otherwise it is a SoftFail.
     A failure after the first file change restores the clone when allow_reset is set. A commit or push failure is HardFail
     (a human looks); a push failure keeps the local commit, which then blocks every later run until it is resolved."""
     repo = Path(repo)
     if pull and not dry_run:
         if run(["git", "status", "--porcelain"], repo, "git status").strip():
-            raise SoftFail("working tree is dirty — refusing to publish")
+            if not allow_reset:
+                raise SoftFail("working tree is dirty — refusing to publish")
+            log("working tree of %s is dirty (left by an interrupted run) — restored to HEAD, then publishing" % repo)
+            restore(repo)
         fetch(repo, remote)
         ahead = local_ahead(repo, remote, branch)
         if ahead:
@@ -359,6 +367,19 @@ class Gate:
         except OSError:
             pass
 
+    def todays_post_on_origin(self, day):
+        """slug of a post dated `day` on origin/main, else None. A dry run reads this clone only; an unreachable origin is None."""
+        d = dt.date.fromisoformat(day)
+        try:
+            if self.kw.get("dry_run"):
+                return post_dated(self.repo, d)
+            remote = self.kw.get("remote", "origin")
+            fetch(self.repo, remote)
+            return origin_post_dated(self.repo, d, remote)
+        except SoftFail as e:
+            self.say("could not check origin for %s: %s" % (day, e))
+            return None
+
     def warn_stock(self):
         n = len(ready_items(self.repo))
         msg = stock_warning(n)
@@ -391,6 +412,14 @@ class Gate:
             self.say("%s: %s" % (action, why))
             return action, why
         if action == "expired":
+            # RunAtLoad can start a tick after the window closed: a post already on origin/main is today's, not a miss
+            done = self.todays_post_on_origin(state["date"])
+            if done:
+                state["published"] = True
+                if not self.kw.get("dry_run"):
+                    save_state(self.state_path, state)
+                self.say("already: %s is on origin/main (window closed before this tick) — slot.json published=true" % done)
+                return "already", done
             self.say("expired: %s" % why)
             self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % state["date"], token=state["date"])
             return action, why
@@ -401,7 +430,7 @@ class Gate:
         self.say("due: " + why)
         self.warn_stock()
         try:
-            status, slug = self.publish_fn(self.repo, now.date(), state["time"], **self.kw)
+            status, slug = self.publish_fn(self.repo, now.date(), state["time"], log=self.say, **self.kw)
         except HardFail as e:
             self.say("HARD FAIL: %s" % e)
             self.base.mkdir(parents=True, exist_ok=True)
@@ -410,6 +439,10 @@ class Gate:
             return "failed", str(e)
         except SoftFail as e:
             self.say("soft fail: %s (retry next tick)" % e)
+            if isinstance(e, IncompleteHead):
+                self.alert("HEAD_INCOMPLETE", "블러쉬랩 큐 미완성", str(e)[:150])
+            if minute_clock(now) == WINDOW_END:  # launchd's 18:45:00 tick is due, not expired: report today's miss here
+                self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 오늘 미발행 — 18:45 마지막 틱까지 발행하지 못했습니다. 로그를 확인하세요." % state["date"], token=state["date"])
             return "failed", str(e)
         except Exception as e:  # unexpected: log the traceback, restore, and retry next tick (never a crash under launchd)
             self.say("unexpected %s: %s — restoring, retry next tick\n%s" % (type(e).__name__, e, traceback.format_exc()[-1500:]))
