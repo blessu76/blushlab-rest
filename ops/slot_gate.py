@@ -2,7 +2,8 @@
 """Random-afternoon slot gate for the blushlab.ipe.rest journal — stdlib only (Python 3.8+).
 
 One post a day, at a random time in 12:00-18:45 KST (15-minute steps) whose hour is never the same as yesterday's.
-launchd (ops/rest.ipe.blushlab-publish.plist, every 15 min 12:00-18:45 KST) runs this script; most ticks do nothing.
+launchd (ops/rest.ipe.blushlab-publish.plist: every 15 min 12:00-18:45 KST, plus 19:00, 21:00, 23:45 for the expired-window
+origin check) runs this script; most ticks do nothing.
 
 State files in the base dir (default ~/.ipe/blushlab-publish/):
   slot.json   {"date": "YYYY-MM-DD", "time": "HH:MM", "prev_date": ..., "prev_time": ..., "published": true|false}
@@ -12,11 +13,13 @@ State files in the base dir (default ~/.ipe/blushlab-publish/):
 
 Each tick:
   1. slot.json date is not today -> draw a new time (hour != yesterday's); yesterday's date/time move to prev_*.
-     A previous day that was never published -> one MISSED notice.
+     A previous day that was never published -> origin/main is checked for it first: a post there = already (no notice);
+     none = one MISSED notice; unreachable = one MISSED notice worded 확인 불가.
   2. published already true -> nothing.   now < time -> wait.
      now after the window end (18:45, judged to the minute: 18:45:30 is still inside) -> expired: origin/main is checked
      (at most once per 15 min, origin_check.json). A post dated today there -> published = true. An unreachable origin ->
-     no notice, slot.json untouched, checked again on a later tick. Otherwise MISSED notice once.
+     no MISSED, slot.json untouched, checked again on a later tick; the 23:45 tick still unable to check -> ORIGIN_UNKNOWN
+     notice once a day. Otherwise MISSED notice once.
   3. otherwise publish the FIRST queue post (content/queue/NN-slug/, all 12 languages). The head is never skipped: an
      incomplete head is a SoftFail (retry next tick). It is moved to content/journal/<slug>/ with `published:` = today +
      the slot time, then build_site.py -> scripts/check.sh -> git commit -> git push origin main.
@@ -34,7 +37,8 @@ Each tick:
 
   ⚠️ The default repo is the dedicated clone ~/.ipe/blushlab-publish/repo. Recovery runs `git reset --hard` and `git clean`,
      so nobody works by hand in that clone. --repo and BLUSHLAB_PUBLISH_REPO are for tests: they pick another clone, and
-     a publish run there resets or cleans only with --allow-reset. A missing clone is logged and notified, not a crash.
+     restore() refuses any clone that is not the dedicated one (--allow-reset is ignored outside it). A missing clone is
+     logged and notified, not a crash.
 
   python3 ops/slot_gate.py --status --repo .   # next scheduled time + queue, touches nothing
   python3 ops/slot_gate.py                 # normal tick
@@ -64,6 +68,8 @@ DEFAULT_BASE = HOME / "blushlab-publish"
 DEDICATED_REPO = DEFAULT_BASE / "repo"  # the default publishing clone
 QUEUE_RE = re.compile(r"^(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
 ORIGIN_CHECK_EVERY = dt.timedelta(minutes=15)  # the expired-window origin check fetches at most this often (per day)
+LAST_TICK = dt.time(23, 45)  # the last launchd tick of the day: an origin check still unknown here -> ORIGIN_UNKNOWN notice
+GIT_TIMEOUT = 120  # seconds per git call; a timeout is a SoftFail
 
 
 class SoftFail(Exception):
@@ -216,8 +222,27 @@ def save_state(path, state):
 
 # ---------------------------------------------------------------- publishing
 
+def git_env():
+    """environment for git calls: never stop on a credential prompt (launchd has no terminal)."""
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def git_run(args, cwd, what):
+    """one git call with GIT_TIMEOUT and no prompt. -> CompletedProcess; a timeout is a SoftFail."""
+    try:
+        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True,
+                              timeout=GIT_TIMEOUT, env=git_env())
+    except subprocess.TimeoutExpired:
+        raise SoftFail("%s timed out after %ds" % (what, GIT_TIMEOUT))
+
+
 def run(cmd, cwd, what):
-    r = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+    if cmd and cmd[0] == "git":
+        r = git_run(cmd[1:], cwd, what)
+    else:
+        r = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
     if r.returncode != 0:
         raise SoftFail("%s failed (%d): %s" % (what, r.returncode, (r.stdout + r.stderr).strip()[-600:]))
     return r.stdout
@@ -237,15 +262,18 @@ def pull_rebase(repo, remote="origin", branch="main"):
     try:
         run(["git", "pull", "--rebase", remote, branch], repo, "git pull --rebase")
     except SoftFail:
-        subprocess.run(["git", "rebase", "--abort"], cwd=str(repo), capture_output=True)  # no-op when no rebase is running
+        try:
+            git_run(["rebase", "--abort"], repo, "git rebase --abort")  # no-op when no rebase is running
+        except SoftFail:
+            pass
         raise
 
 
 def origin_post_dated(repo, day, remote="origin", branch="main"):
     """slug of a journal post dated `day` on <remote>/<branch> (call after fetch), else None. Local-only commits do not count."""
     ref = "%s/%s" % (remote, branch)
-    r = subprocess.run(["git", "grep", "-l", "-E", "^published:[[:space:]]*%s" % day.isoformat(), ref, "--", "content/journal/*/en.md"],
-                       cwd=str(repo), capture_output=True, text=True)
+    r = git_run(["grep", "-l", "-E", "^published:[[:space:]]*%s" % day.isoformat(), ref, "--", "content/journal/*/en.md"],
+                repo, "git grep origin")
     if r.returncode not in (0, 1):  # 1 = no match
         raise SoftFail("git grep origin failed: %s" % r.stderr.strip()[-300:])
     for line in r.stdout.splitlines():  # "origin/main:content/journal/<slug>/en.md"
@@ -278,8 +306,10 @@ def notify(title, msg):
 
 
 def restore(repo):
-    """back to HEAD: unstage, drop edits and the new journal files. Only when reset is allowed (see publish_one).
-    A git step that fails is a SoftFail, never silently ignored."""
+    """back to HEAD: unstage, drop edits and the new journal files. The one place that resets: a clone that is not the
+    dedicated one is refused (SoftFail, nothing touched). A git step that fails is a SoftFail, never silently ignored."""
+    if not is_dedicated(repo):
+        raise SoftFail("restore refused: %s is not the dedicated clone — nothing reset" % repo)
     run(["git", "reset", "-q", "--hard", "HEAD"], repo, "restore: git reset")
     run(["git", "clean", "-fdq"], repo, "restore: git clean")
 
@@ -324,9 +354,10 @@ def publish_one(repo, day, hm, remote="origin", branch="main", dry_run=False, pu
         shutil.rmtree(str(src))
         run([sys.executable, "scripts/build_site.py"], repo, "build_site.py")
         run(["bash", "scripts/check.sh"], repo, "check.sh")
-    except Exception:
+    except Exception as e:
+        log("publish failed before commit: %s: %s" % (type(e).__name__, e))  # the original error is logged before any restore
         if allow_reset:
-            restore(repo)
+            restore(repo)  # a SoftFail here (restore refused or failed) replaces it; the original is logged above
         raise
     try:
         run(["git", "add", "-A"], repo, "git add")
@@ -414,13 +445,26 @@ class Gate:
         try:
             slug = self.todays_post_on_origin(day)
             res = ("post", slug) if slug else ("none", None)
-        except SoftFail as e:
-            res = ("error", str(e))
+        except Exception as e:  # SoftFail (git failed / timed out) and OS errors (git missing, ...) alike: unknown, not a miss
+            res = ("error", "%s: %s" % (type(e).__name__, e))
         if not self.kw.get("dry_run"):
             self.base.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({"date": day, "at": now.isoformat(), "result": res[0], "detail": res[1]},
                                        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return res
+
+    def missed_day(self, day):
+        """a day that was never marked published: origin/main decides which notice (if any). post -> already, no notice;
+        none -> MISSED; unreachable -> MISSED worded as unverified (never silence: a missing notice is worse)."""
+        result, detail = self.origin_check(day)
+        if result == "post":
+            self.say("already: %s is on origin/main for %s — no notice" % (detail, day))
+            return
+        if result == "error":
+            self.say("origin unknown for %s (%s) — MISSED, unverified" % (day, detail))
+            self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 발행 여부를 확인하지 못했습니다(origin 확인 불가). 로그를 확인하세요." % day, token=day)
+            return
+        self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % day, token=day)
 
     def warn_stock(self):
         n = len(ready_items(self.repo))
@@ -444,8 +488,8 @@ class Gate:
             save_state(self.state_path, state)
             self.say("new day %s: slot drawn %s KST (prev %s %s)" % (now.date(), state["time"], state["prev_date"], state["prev_time"]))
             if old and old.get("date") and old["date"] < now.date().isoformat() and not old.get("published"):
-                self.say("previous day %s was never published" % old["date"])
-                self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % old["date"], token=old["date"])
+                self.say("previous day %s was never published — checking origin/main before any notice" % old["date"])
+                self.missed_day(old["date"])
             self.warn_stock()
         if roll_only:
             return "rolled-only", state["time"]
@@ -463,8 +507,12 @@ class Gate:
                 self.say("already: %s is on origin/main (window closed before this tick) — slot.json published=true" % detail)
                 return "already", detail
             if result == "error":
-                # origin unknown: no notice and no state change; a later tick checks again
-                self.say("expired, origin unreachable (%s) — no notice, checked again on a later tick" % detail)
+                # origin unknown: no MISSED and no state change; a later tick checks again. The last tick of the day
+                # still unable to check tells a human once (ORIGIN_UNKNOWN), so the silence cannot last unnoticed.
+                self.say("expired, origin unreachable (%s) — no MISSED, checked again on a later tick" % detail)
+                if minute_clock(now) >= LAST_TICK:
+                    self.alert("ORIGIN_UNKNOWN", "블러쉬랩 발행 확인 불가",
+                               "%s 발행 여부를 origin 에서 확인하지 못했습니다. 로그를 확인하세요." % state["date"])
                 return "expired-unknown", why
             self.say("expired: %s" % why)
             self.alert("MISSED", "블러쉬랩 발행 놓침", "%s 슬롯에 발행하지 못했습니다. 로그를 확인하세요." % state["date"], token=state["date"])
@@ -550,7 +598,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=None, help="publish clone (default: the dedicated clone; any other path is for tests)")
     ap.add_argument("--allow-reset", action="store_true",
-                    help="let a publish run reset/clean a clone that is not the dedicated one (the dedicated clone always may)")
+                    help="무시됨(호환용) — 복구는 전용 클론에서만")
     ap.add_argument("--base", default=os.environ.get("BLUSHLAB_PUBLISH_BASE", str(DEFAULT_BASE)), help="state dir: slot.json, FAILED, alerts.json, STOCK_ALERT")
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--now", help="ISO time with offset (test knob), e.g. 2026-11-20T13:00:00+09:00")

@@ -297,6 +297,24 @@ class GitPublishTest(unittest.TestCase):
         _git(self.work, "commit", "-q", "-m", "init")
         _git(self.work, "remote", "add", "origin", str(self.origin))
         _git(self.work, "push", "-q", "-u", "origin", "main")
+        # restore() only ever resets the dedicated clone: this fixture clone stands in for it. Tests that need a
+        # non-dedicated clone override DEDICATED_REPO themselves.
+        p = mock.patch.object(sg, "DEDICATED_REPO", self.work)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def remote_post(self, day, slug="remote-post"):
+        """push a journal post dated `day` to origin/main from another clone (this clone's origin ref stays stale)."""
+        other = self.tmp / ("other-" + slug)
+        _git(self.tmp, "clone", "-q", str(self.origin), str(other))
+        _git(other, "config", "user.name", "test")
+        _git(other, "config", "user.email", "test@example.invalid")
+        post = other / "content" / "journal" / slug
+        post.mkdir(parents=True)
+        (post / "en.md").write_text("---\ntitle: x\npublished: %sT13:15+09:00\n---\nbody\n" % day, encoding="utf-8")
+        _git(other, "add", "-A")
+        _git(other, "commit", "-q", "-m", "remote post")
+        _git(other, "push", "-q", "origin", "main")
 
     def flag(self, name):
         (self.flags / name).write_text("1")
@@ -494,7 +512,7 @@ class GitPublishTest(unittest.TestCase):
         """W1: a human's clone (not the dedicated one) is never reset, even with allow_reset: the file stays, SoftFail."""
         (self.work / "stray.txt").write_text("left over")
         logs = []
-        with self.assertRaises(sg.SoftFail):
+        with mock.patch.object(sg, "DEDICATED_REPO", self.tmp / "elsewhere"), self.assertRaises(sg.SoftFail):
             sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
         self.assertEqual((self.work / "stray.txt").read_text(), "left over")
         self.assertEqual(len(sg.queue_items(self.work)), 3)
@@ -531,8 +549,8 @@ class GitPublishTest(unittest.TestCase):
             seen.append(kw)
             return "empty", None
 
-        with mock.patch.object(sg, "publish_one", fake), contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
+        with mock.patch.object(sg, "DEDICATED_REPO", self.tmp / "elsewhere"), mock.patch.object(sg, "publish_one", fake), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rc = sg.main(["--repo", str(self.work), "--allow-reset", "--base", str(self.base), "--now", "2026-11-20T18:45:00+09:00"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(seen), 1)
@@ -633,6 +651,138 @@ class GitPublishTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(seen), 1)
         self.assertTrue(seen[0]["allow_reset"])
+
+    # ---- 5차: day rollover checks origin first (item 1)
+
+    def test_rollover_previous_day_on_origin_is_already_no_notice(self):
+        self.remote_post("2026-11-19", "yesterday-post")
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-19", "time": "13:15", "published": False})
+        g = self.gate(12, 5)
+        self.assertEqual(g.tick(roll_only=True)[0], "rolled-only")
+        self.assertEqual([t for t, _ in self.notes if t == "블러쉬랩 발행 놓침"], [])
+
+    def test_rollover_previous_day_not_on_origin_notifies_missed_once(self):
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-19", "time": "13:15", "published": False})
+        g = self.gate(12, 5)
+        self.assertEqual(g.tick(roll_only=True)[0], "rolled-only")
+        self.assertEqual(self.gate(12, 10).tick(roll_only=True)[0], "rolled-only")  # same day: no roll, no second notice
+        missed = [m for t, m in self.notes if t == "블러쉬랩 발행 놓침"]
+        self.assertEqual(len(missed), 1)
+        self.assertIn("2026-11-19", missed[0])
+        self.assertNotIn("확인 불가", missed[0])
+
+    def test_rollover_origin_unknown_notifies_missed_as_unverified(self):
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-19", "time": "13:15", "published": False})
+        with mock.patch.object(sg, "fetch", side_effect=FileNotFoundError("git")):
+            self.assertEqual(self.gate(12, 5).tick(roll_only=True)[0], "rolled-only")
+        missed = [m for t, m in self.notes if t == "블러쉬랩 발행 놓침"]
+        self.assertEqual(len(missed), 1)
+        self.assertIn("2026-11-19", missed[0])
+        self.assertIn("확인 불가", missed[0])
+
+    # ---- item 2: the extra ticks after the window re-check origin; ORIGIN_UNKNOWN on the last tick
+
+    def test_19_and_21_recheck_origin_and_2345_unknown_notifies_once(self):
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-20", "time": "13:15", "published": False})
+        with mock.patch.object(sg, "fetch", side_effect=OSError("no git")):
+            self.assertEqual(self.gate(19, 0).tick()[0], "expired-unknown")
+            self.assertEqual(self.gate(21, 0).tick()[0], "expired-unknown")
+            self.assertEqual([t for t, _ in self.notes], [])  # no MISSED, no ORIGIN_UNKNOWN before the last tick
+            self.assertEqual(self.gate(23, 45).tick()[0], "expired-unknown")
+            self.assertEqual(self.gate(23, 46).tick()[0], "expired-unknown")  # same day: no second notice
+        self.assertEqual([t for t, _ in self.notes], ["블러쉬랩 발행 확인 불가"])
+        self.assertFalse(sg.load_state(self.base / "slot.json")["published"])
+        self.assertFalse((self.base / "FAILED").exists())
+
+    def test_21_and_23_45_recheck_origin_and_find_today_on_origin(self):
+        """the 21:00 tick sees a post on origin/main -> already; the 23:45 tick does not notify at all."""
+        self.remote_post("2026-11-20", "late-post")
+        sg.save_state(self.base / "slot.json", {"date": "2026-11-20", "time": "13:15", "published": False})
+        self.assertEqual(self.gate(21, 0).tick(), ("already", "late-post"))
+        self.assertEqual(self.gate(23, 45).tick()[0], "published")  # state now published=true: nothing more
+        self.assertEqual(self.notes, [])
+
+    # ---- item 3: any OS error from the origin check is "error", not an uncaught crash
+
+    def test_origin_check_os_error_is_error_result(self):
+        g = self.gate(19, 10)
+        with mock.patch.object(sg, "fetch", side_effect=FileNotFoundError("git")):
+            result, detail = g.origin_check("2026-11-20")
+        self.assertEqual(result, "error")
+        self.assertIn("FileNotFoundError", detail)
+
+    # ---- item 4: git calls get a timeout and no credential prompt; a timeout is a SoftFail
+
+    def test_git_calls_get_timeout_and_no_terminal_prompt(self):
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append((cmd, kw))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch.object(sg.subprocess, "run", fake):
+            sg.fetch(self.work, "origin")
+        cmd, kw = calls[0]
+        self.assertEqual(cmd, ["git", "fetch", "--quiet", "origin"])
+        self.assertEqual(kw["timeout"], 120)
+        self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
+
+    def test_git_timeout_is_soft_fail_and_origin_error(self):
+        def boom(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, 120)
+
+        with mock.patch.object(sg.subprocess, "run", boom):
+            with self.assertRaises(sg.SoftFail) as cm:
+                sg.fetch(self.work, "origin")
+            self.assertIn("timed out", str(cm.exception))
+            result, _ = self.gate(19, 10).origin_check("2026-11-20")
+        self.assertEqual(result, "error")
+
+    # ---- item 5: restore() is the one reset point; the original error is logged before any restore
+
+    def test_restore_refuses_a_clone_that_is_not_dedicated(self):
+        (self.work / "stray.txt").write_text("left over")
+        with mock.patch.object(sg, "DEDICATED_REPO", self.tmp / "elsewhere"):
+            with self.assertRaises(sg.SoftFail):
+                sg.restore(self.work)
+        self.assertEqual((self.work / "stray.txt").read_text(), "left over")
+
+    def test_failed_publish_logs_original_error_before_restore(self):
+        self.flag("check_fail")
+        logs = []
+        with self.assertRaises(sg.SoftFail):
+            sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
+        self.assertTrue(any("publish failed before commit: SoftFail: check.sh failed" in m for m in logs))
+        self.assert_restored()
+
+    def test_restore_refused_still_surfaces_original_error_in_log(self):
+        self.flag("check_fail")
+        logs = []
+        with mock.patch.object(sg, "DEDICATED_REPO", self.tmp / "elsewhere"):
+            with self.assertRaises(sg.SoftFail) as cm:
+                sg.publish_one(self.work, D(2026, 11, 20), "13:15", remote="origin", allow_reset=True, log=logs.append)
+        self.assertIn("restore refused", str(cm.exception))
+        self.assertTrue(any("check.sh failed" in m for m in logs))  # the original error was logged first
+
+
+class LaunchdAndHelpTest(unittest.TestCase):
+    """item 2 (plist) and item 6 (--allow-reset help): plain file checks, no git."""
+
+    def test_plist_is_well_formed_and_runs_the_extra_ticks(self):
+        import plistlib
+        with open(REPO / "ops" / "rest.ipe.blushlab-publish.plist", "rb") as f:
+            pl = plistlib.load(f)
+        got = [(d["Hour"], d["Minute"]) for d in pl["StartCalendarInterval"]]
+        self.assertEqual(len(got), 31)  # 12:00-18:45 every 15 min (28) + 19:00, 21:00, 23:45
+        for hm in ((19, 0), (21, 0), (23, 45), (12, 0), (18, 45)):
+            self.assertIn(hm, got)
+        self.assertEqual(len(set(got)), len(got))
+
+    def test_allow_reset_help_says_it_is_ignored(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), self.assertRaises(SystemExit):
+            sg.main(["--help"])
+        self.assertIn("무시됨(호환용) — 복구는 전용 클론에서만", buf.getvalue())
 
 
 if __name__ == "__main__":
