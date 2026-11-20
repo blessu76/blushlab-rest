@@ -254,7 +254,11 @@ class SlotWindowTest(unittest.TestCase):
 class RepoGuardTest(unittest.TestCase):
     def test_only_dedicated_clone_without_explicit_repo(self):
         self.assertIsNone(sg.guard_repo(sg.DEDICATED_REPO, explicit=False))
-        self.assertIsNotNone(sg.guard_repo(REPO, explicit=False))  # this checkout
+        # "some other checkout" must be a path that is not the dedicated clone, wherever the suite runs
+        # (this checkout itself is the dedicated clone when run from ~/.ipe/blushlab-publish/repo)
+        other = Path(tempfile.gettempdir()) / "blushlab-other-checkout"  # never created; guard only compares paths
+        self.assertNotEqual(other.resolve(), sg.DEDICATED_REPO.resolve())
+        self.assertIsNotNone(sg.guard_repo(other, explicit=False))
         self.assertIsNone(sg.guard_repo(REPO, explicit=True))  # --repo given (tests)
 
 
